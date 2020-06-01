@@ -25,7 +25,9 @@ data_list = {'bert': BERTLoader, 'electra': BERTLoader, 'roberta': RoBERTaLoader
 
 head_list = {'linear': LinearHead, 'cnn': CNNHead, 'transformer': TransformerHead}
 schedule_list = {'linear_warmup': get_linear_schedule_with_warmup, 'cosine_warmup': get_cosine_schedule_with_warmup}
+
 parser = argparse.ArgumentParser()
+
 parser.add_argument("--seed", default=1024, type=int)
 parser.add_argument("--data", default='train', type=str, choices=['train', 'extended'])
 parser.add_argument("--model", default='roberta', type=str, choices=list(model_list.keys()))

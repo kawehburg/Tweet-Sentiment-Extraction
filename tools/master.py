@@ -661,8 +661,8 @@ def train_fn(data_loader, model, optimizer, device, loss_fn=None, scheduler=None
                 idx_end=np.argmax(outputs_end[px, :]),  # Predicted end index for the px'th tweet in the batch
                 offsets=offsets[px]  # Offsets for each of the tokens for the px'th tweet in the batch
             )
-            if 'new' in tweet_id:
-                continue
+            # if 'new' in tweet_id:
+            #     continue
             jaccard_scores.append(jaccard_score)
         # Update the jaccard score and loss
         # For details, refer to `AverageMeter` in https://www.kaggle.com/abhishek/utils
@@ -759,8 +759,8 @@ def eval_fn(data_loader, model, device, loss_fn=None):
                     idx_end=np.argmax(outputs_end[px, :]),  # Predicted end index for the px'th tweet in the batch
                     offsets=offsets[px]  # Offsets for each of the tokens for the px'th tweet in the batch
                 )
-                if 'new' in tweet_id:
-                    continue
+                # if 'new' in tweet_id:
+                #     continue
                 jaccard_scores.append(jaccard_score)
             # Update the jaccard score and loss
             # For details, refer to `AverageMeter` in https://www.kaggle.com/abhishek/utils
