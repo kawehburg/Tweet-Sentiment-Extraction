@@ -1,4 +1,4 @@
-from tools.master import train, test, seed_everything, get_loss_fn, build_data, Model, collect
+from tools.master import run, test, seed_everything, get_loss_fn, build_data, Model, collect
 from tools.master import BERTModel, ELECTRAModel, RoBERTaModel, Albert, Embedding
 from tools.master import BERTLoader, RoBERTaLoader, AlbertLoader
 from tools.master import LinearHead, CNNHead, TransformerHead
@@ -32,7 +32,7 @@ parser.add_argument("--model", default='roberta', type=str, choices=list(model_l
 parser.add_argument("--pretrained", default='roberta', type=str, choices=list(config.keys()))
 parser.add_argument("--head", default='linear', type=str, choices=list(head_list.keys()))
 parser.add_argument("--loss", default='ce', type=str)
-parser.add_argument("--lr", default=2e-5, type=float)
+parser.add_argument("--lr", default=3e-5, type=float)
 parser.add_argument("--schedule", default='linear_warmup', type=str, choices=['linear_warmup', 'cosine_warmup'])
 parser.add_argument("--train", default=True, type=bool)
 
@@ -43,7 +43,7 @@ print('CUDA_VISIBLE_DEVICES', os.environ["CUDA_VISIBLE_DEVICES"])
 
 #  0
 SEED = 1024
-seed_everything(SEED)
+# seed_everything(SEED)
 
 #  1
 data_name = 'train'
@@ -56,9 +56,9 @@ base_model = model_list[MODEL](name=name)
 data = data_list[MODEL]
 
 #  3
-HEAD = 'cnn'
+HEAD = 'linear'
 d_model = config[name]
-layers_used = 1
+layers_used = 2
 head = head_list[HEAD](d_model, layers_used, num_layers=6)
 
 #  4
@@ -80,14 +80,15 @@ result_path = f'results/{data_name}_{MODEL}_{d_model}_{HEAD}_'
 print(save_path)
 model = Model(base_model, head)
 print('param num =', collect(model))
-train(0, DATA, model, data, lr, train_batch_size, val_batch_size, name, loss_fn, schedule, epochs, save_path)
-train(1, DATA, model, data, lr, train_batch_size, val_batch_size, name, loss_fn, schedule, epochs, save_path)
-train(2, DATA, model, data, lr, train_batch_size, val_batch_size, name, loss_fn, schedule, epochs, save_path)
-train(3, DATA, model, data, lr, train_batch_size, val_batch_size, name, loss_fn, schedule, epochs, save_path)
-train(4, DATA, model, data, lr, train_batch_size, val_batch_size, name, loss_fn, schedule, epochs, save_path)
+
+run(0, DATA, data, model, train_batch_size, epochs, loss_fn, save_path, lr=lr, scheduler_fn=schedule, name=name)
+run(1, DATA, data, model, train_batch_size, epochs, loss_fn, save_path, lr=lr, scheduler_fn=schedule, name=name)
+run(2, DATA, data, model, train_batch_size, epochs, loss_fn, save_path, lr=lr, scheduler_fn=schedule, name=name)
+run(3, DATA, data, model, train_batch_size, epochs, loss_fn, save_path, lr=lr, scheduler_fn=schedule, name=name)
+run(4, DATA, data, model, train_batch_size, epochs, loss_fn, save_path, lr=lr, scheduler_fn=schedule, name=name)
 
 ########
-test_data = build_data("data/test.csv", data, train_batch_size, val_batch_size, name, fold=None)
+test_data = build_data("data/test.csv", data, train_batch_size, val_batch_size, name)
 test(model, test_data, save_path, result_path)
 
 ########

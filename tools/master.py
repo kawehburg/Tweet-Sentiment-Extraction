@@ -212,7 +212,7 @@ class RoBERTaLoader:
             'offsets': tweet_offsets,
         }
     
-    def __init__(self, tweet, sentiment, selected_text, name, max_len=192, **kwargs):
+    def __init__(self, tweet, sentiment, selected_text, name='roberta', max_len=192, **kwargs):
         self.tweet = tweet
         self.sentiment = sentiment
         self.selected_text = selected_text
@@ -574,7 +574,7 @@ class TransformerHead(nn.Module):
         return start_logits, end_logits
 
 
-def train_fn(data_loader, model, optimizer, loss_fn, device, scheduler=None):
+def train_fn(data_loader, model, optimizer, device, loss_fn=None, scheduler=None):
     model.train()
     losses = utils.AverageMeter()
     jaccards = utils.AverageMeter()
@@ -677,7 +677,7 @@ def calculate_jaccard_score(
     return jac, filtered_output
 
 
-def eval_fn(data_loader, model, loss_fn, device):
+def eval_fn(data_loader, model, device, loss_fn=None):
     model.eval()
     losses = utils.AverageMeter()
     jaccards = utils.AverageMeter()
@@ -746,93 +746,84 @@ def eval_fn(data_loader, model, loss_fn, device):
     return jaccards.avg
 
 
-def build_data(path, builder, train_batch_size, val_batch_size, name, fold=None):
+def build_data(path, builder, train_batch_size, val_batch_size, name):
+    df_test = pd.read_csv("data/test.csv")
+    df_test.loc[:, "selected_text"] = df_test.text.values
+    test_dataset = builder(df_test.text.values, df_test.sentiment.values, df_test.selected_text.values,
+                           max_len=192, name=name)
+    
+    # Instantiate DataLoader with `test_dataset`
+    data_loader = torch.utils.data.DataLoader(
+        test_dataset,
+        shuffle=False,
+        batch_size=val_batch_size,
+        num_workers=1
+    )
+    return data_loader
+
+
+def run(fold, path, data, model, batch_size, epochs, loss_fn, save_path, lr=3e-5, scheduler_fn=None, name='roberta'):
     dfx = pd.read_csv(path)
-    if fold is not None:
-        df_train = dfx[dfx.kfold != fold].reset_index(drop=True)
-        df_valid = dfx[dfx.kfold == fold].reset_index(drop=True)
-        
-        # Instantiate TweetDataset with training data
-        train_dataset = builder(df_train.text.values, df_train.sentiment.values, df_train.selected_text.values,
-                                max_len=192, name=name)
-        train_data_loader = torch.utils.data.DataLoader(
-            train_dataset,
-            batch_size=train_batch_size,
-            num_workers=4
-        )
-        
-        # Instantiate TweetDataset with validation data
-        valid_dataset = builder(df_valid.text.values, df_valid.sentiment.values, df_valid.selected_text.values,
-                                max_len=192, name=name)
-        
-        # Instantiate DataLoader with `valid_dataset`
-        valid_data_loader = torch.utils.data.DataLoader(
-            valid_dataset,
-            batch_size=val_batch_size,
-            num_workers=2
-        )
-        return train_data_loader, valid_data_loader
-    else:
-        df_test = pd.read_csv("data/test.csv")
-        df_test.loc[:, "selected_text"] = df_test.text.values
-        test_dataset = builder(df_test.text.values, df_test.sentiment.values, df_test.selected_text.values,
-                               max_len=192, name=name)
-        
-        # Instantiate DataLoader with `test_dataset`
-        data_loader = torch.utils.data.DataLoader(
-            test_dataset,
-            shuffle=False,
-            batch_size=val_batch_size,
-            num_workers=1
-        )
-        return data_loader
-
-
-def run(fold, model, train_data_loader, valid_data_loader, loss_fn, lr, batch_size, scheduler_fn, epochs, save_path):
+    df_train = dfx[dfx.kfold != fold].reset_index(drop=True)
+    df_valid = dfx[dfx.kfold == fold].reset_index(drop=True)
+    train_dataset = data(
+        tweet=df_train.text.values,
+        sentiment=df_train.sentiment.values,
+        selected_text=df_train.selected_text.values,
+        name=name
+    )
+    
+    # Instantiate DataLoader with `train_dataset`
+    # This is a generator that yields the dataset in batches
+    train_data_loader = torch.utils.data.DataLoader(
+        train_dataset,
+        batch_size=batch_size,
+        num_workers=4
+    )
+    
+    # Instantiate TweetDataset with validation data
+    valid_dataset = data(
+        tweet=df_valid.text.values,
+        sentiment=df_valid.sentiment.values,
+        selected_text=df_valid.selected_text.values,
+        name=name
+    )
+    
+    # Instantiate DataLoader with `valid_dataset`
+    valid_data_loader = torch.utils.data.DataLoader(
+        valid_dataset,
+        batch_size=20,
+        num_workers=2
+    )
+    
     device = torch.device("cuda")
+    model = copy.deepcopy(model)
     model.to(device)
-    # Calculate the number of training steps
-    num_train_steps = int(len(train_data_loader) / batch_size * epochs)
-    # Get the list of named parameters
+    print(collect(model))
+    num_train_steps = int(len(df_train) / batch_size * epochs)
     param_optimizer = list(model.named_parameters())
-    # Specify parameters where weight decay shouldn't be applied
     no_decay = ["bias", "LayerNorm.bias", "LayerNorm.weight"]
-    # Define two sets of parameters: those with weight decay, and those without
     optimizer_parameters = [
         {'params': [p for n, p in param_optimizer if not any(nd in n for nd in no_decay)], 'weight_decay': 0.001},
         {'params': [p for n, p in param_optimizer if any(nd in n for nd in no_decay)], 'weight_decay': 0.0},
     ]
+    # Instantiate AdamW optimizer with our two sets of parameters, and a learning rate of 3e-5
     optimizer = AdamW(optimizer_parameters, lr=lr)
-    
     scheduler = scheduler_fn(
         optimizer,
-        num_warmup_steps=64,
+        num_warmup_steps=0,
         num_training_steps=num_train_steps
     )
-    
-    # Apply early stopping with patience of 2
-    # This means to stop training new epochs when 2 rounds have passed without any improvement
     es = utils.EarlyStopping(patience=2, mode="max")
-    # es = EarlyStopping(patience=2)
     print(f"Training is Starting for fold={fold}")
-    
-    # I'm training only for 3 epochs even though I specified 5!!!
     for epoch in range(epochs):
-        train_fn(train_data_loader, model, optimizer, loss_fn, device, scheduler=scheduler)
-        jaccard = eval_fn(valid_data_loader, model, loss_fn, device)
+        train_fn(train_data_loader, model, optimizer, device, loss_fn=loss_fn, scheduler=scheduler)
+        jaccard = eval_fn(valid_data_loader, model, device, loss_fn=loss_fn)
         print(f"Jaccard Score = {jaccard}")
         es(jaccard, model, model_path=save_path + str(fold) + '.bin')
         if es.early_stop:
             print("Early stopping")
             break
-
-
-def train(f, path, model, builder, lr, train_batch_size, val_batch_size, name, loss_fn, scheduler_fn, epochs,
-          save_path):
-    train_model = copy.deepcopy(model)
-    train_data_loader, valid_data_loader = build_data(path, builder, train_batch_size, val_batch_size, name, f)
-    run(f, train_model, train_data_loader, valid_data_loader, loss_fn, lr, train_batch_size, scheduler_fn, epochs,
-        save_path)
 
 
 def test(model, data_loader, SAVE_HEAD, MODE):

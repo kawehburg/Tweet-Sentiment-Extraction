@@ -13,6 +13,7 @@ import tokenizers
 from transformers import AdamW
 from transformers import get_linear_schedule_with_warmup
 from tqdm.autonotebook import tqdm
+from tools.master import collect
 import utils
 
 ROBERTA_PATH = "roberta"
@@ -22,13 +23,13 @@ TOKENIZER = tokenizers.ByteLevelBPETokenizer(
     lowercase=True,
     add_prefix_space=True
 )
-TRAINING_FILE = "data/train_folds.csv"
+TRAINING_FILE = "data/extended_folds.csv"
 MAX_LEN = 192
 TRAIN_BATCH_SIZE = 20
 VALID_BATCH_SIZE = 7
 EPOCHS = 3
-SAVE_HEAD = 'saved/distance02_model_'
-MODE = 'distance02_'
+SAVE_HEAD = 'saved/extended_model_'
+MODE = 'extended_'
 
 
 def process_data(tweet, selected_text, sentiment, tokenizer, max_len):
@@ -191,10 +192,10 @@ class TweetModel(transformers.BertPreTrainedModel):
 def loss_fn(start_logits, end_logits, start_positions, end_positions, mask=None):
     c_loss = ce_loss(start_logits, end_logits, start_positions, end_positions)
     # use distance loss computed by jaccard score
-    d_loss = distance_loss(start_logits, end_logits, start_positions, end_positions, mask=mask)
-    loss = (c_loss + d_loss) / 2
+    # d_loss = distance_loss(start_logits, end_logits, start_positions, end_positions, mask=mask)
+    # loss = (c_loss + d_loss) / 2
     # loss = d_loss
-    return loss
+    return c_loss
 
 
 def ce_loss(start_logits, end_logits, start_positions, end_positions):
@@ -506,7 +507,7 @@ def run(fold):
     model = TweetModel(conf=model_config)
     # Move the model to the GPU
     model.to(device)
-    
+    print(collect(model))
     # Calculate the number of training steps
     num_train_steps = int(len(df_train) / TRAIN_BATCH_SIZE * EPOCHS)
     # Get the list of named parameters
