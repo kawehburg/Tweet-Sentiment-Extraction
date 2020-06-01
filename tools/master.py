@@ -110,7 +110,7 @@ class BERTModel(nn.Module):
             ids,
             attention_mask=mask,
         )  # bert_layers x bs x SL x (768 * 2)
-        out = out[1]
+        out = out[2]
         return out
 
 
@@ -333,11 +333,14 @@ class BERTLoader:
             'offsets': tweet_offsets,
         }
     
-    def __init__(self, tweet, sentiment, selected_text, max_len=192, name='base'):
+    def __init__(self, tweet, sentiment, selected_text, max_len=192, name='bert-base-uncased'):
         self.tweet = tweet
         self.sentiment = sentiment
         self.selected_text = selected_text
-        self.tokenizer = BertTokenizer.from_pretrained(name)
+        try:
+            self.tokenizer = BertTokenizer.from_pretrained(name)
+        except OSError:
+            self.tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
         self.max_len = max_len
     
     def __len__(self):
@@ -489,7 +492,7 @@ class AlbertLoader:
 
 
 class LinearHead(nn.Module):
-    def __init__(self, d_model, layers_used):
+    def __init__(self, d_model, layers_used, num_layers=2):
         super().__init__()
         self.d_model = d_model
         self.layers_used = layers_used
@@ -509,7 +512,7 @@ class LinearHead(nn.Module):
 
 
 class CNNHead(nn.Module):
-    def __init__(self, d_model, layers_used):
+    def __init__(self, d_model, layers_used, num_layers=2):
         super().__init__()
         self.d_model = d_model
         self.layers_used = layers_used
@@ -550,19 +553,19 @@ class TransformerHead(nn.Module):
             encoder_layer=nn.TransformerEncoderLayer(d_model=d_model, nhead=8, dim_feedforward=2048),
             num_layers=num_layers,
             norm=LayerNorm(d_model))
-        self.l0 = nn.Linear(d_model * layers_used, 2)
-        for param in self.cnn.parameters():
+        self.l0 = nn.Linear(d_model, 2)
+        for param in self.transformer.parameters():
             if param.data.dim() > 1:
                 xavier_uniform_(param.data)
         xavier_uniform_(self.l0.weight)
     
     def forward(self, out, mask=None):
+        mask = mask.ne(0)
         out = [out[-i - 1] for i in range(self.layers_used)]
         out = torch.cat(out, dim=-1)
         out = self.drop_out(out)
         out = self.d(out)
-        
-        out = self.transformer(out.transpose(0, 1), src_key_padding_mask=~mask)
+        out = self.transformer(out.transpose(0, 1), src_key_padding_mask=~mask).transpose(0, 1)
         
         logits = self.l0(out)
         start_logits, end_logits = logits.split(1, dim=-1)
@@ -804,7 +807,7 @@ def run(fold, model, train_data_loader, valid_data_loader, loss_fn, lr, batch_si
     
     scheduler = scheduler_fn(
         optimizer,
-        num_warmup_steps=0,
+        num_warmup_steps=64,
         num_training_steps=num_train_steps
     )
     
@@ -828,7 +831,8 @@ def run(fold, model, train_data_loader, valid_data_loader, loss_fn, lr, batch_si
 def train(path, model, builder, lr, train_batch_size, val_batch_size, name, loss_fn, scheduler_fn, epochs, save_path):
     for f in range(epochs):
         train_data_loader, valid_data_loader = build_data(path, builder, train_batch_size, val_batch_size, name, f)
-        run(f, model, train_data_loader, valid_data_loader, loss_fn, lr, train_batch_size, scheduler_fn, epochs, save_path)
+        run(f, model, train_data_loader, valid_data_loader, loss_fn, lr, train_batch_size, scheduler_fn, epochs,
+            save_path)
 
 
 def test(model, data_loader, SAVE_HEAD, MODE):
@@ -966,6 +970,8 @@ def get_loss_fn(ce=1., jcd=0.):
     def f(start_logits, end_logits, start_positions, end_positions, mask=None):
         c_loss = ce_loss(start_logits, end_logits, start_positions, end_positions)
         # use distance loss computed by jaccard score
+        if jcd == 0:
+            return c_loss
         d_loss = distance_loss(start_logits, end_logits, start_positions, end_positions, mask=mask)
         loss = ce * c_loss + jcd * d_loss
         # loss = d_loss
@@ -1030,3 +1036,14 @@ def distance_loss(start_logits, end_logits, start_positions, end_positions, mask
     end_loss = -(F.log_softmax(end_logits, dim=-1) * end_score[:, :end_logits.size(1)]).mean()
     total_loss = (start_loss + end_loss) / 2
     return total_loss
+
+
+def collect(model):
+    param_num = 0
+    escape = 0
+    for name, param in model.named_parameters():
+        s_ = 1
+        for ax_ in param.size():
+            s_ *= ax_
+        param_num += s_
+    return param_num

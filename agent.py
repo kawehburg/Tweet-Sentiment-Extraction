@@ -1,4 +1,4 @@
-from tools.master import train, test, seed_everything, get_loss_fn, build_data, Model
+from tools.master import train, test, seed_everything, get_loss_fn, build_data, Model, collect
 from tools.master import BERTModel, ELECTRAModel, RoBERTaModel, Albert, Embedding
 from tools.master import BERTLoader, RoBERTaLoader, AlbertLoader
 from tools.master import LinearHead, CNNHead, TransformerHead
@@ -12,11 +12,12 @@ pretrained_list = {'bert': ['bert-base-uncased', 'bert-large-uncased'],
                    'electra': ['google/electra-base-discriminator', 'google/electra-large-discriminator'],
                    'roberta': ['roberta'],
                    'albert': ['albert-base-v2', 'albert-large-v2', 'albert-xlarge-v2', 'albert-xxlarge-v2'],
-                   'embedding': []}
+                   'embedding': ['embedding']}
 config = {'bert-base-uncased': 768, 'bert-large-uncased': 1024,
           'google/electra-base-discriminator': 768, 'google/electra-large-discriminator': 1024,
           'roberta': 768,
-          'albert-base-v2': 768, 'albert-large-v2': 1024, 'albert-xlarge-v2': 2048, 'albert-xxlarge-v2': 4096
+          'albert-base-v2': 768, 'albert-large-v2': 1024, 'albert-xlarge-v2': 2048, 'albert-xxlarge-v2': 4096,
+          'embedding': 256
           }
 
 data_list = {'bert': BERTLoader, 'electra': BERTLoader, 'roberta': RoBERTaLoader,
@@ -57,8 +58,8 @@ data = data_list[MODEL]
 #  3
 HEAD = 'cnn'
 d_model = config[name]
-layers_used = 2
-head = head_list[HEAD](d_model, layers_used)
+layers_used = 1
+head = head_list[HEAD](d_model, layers_used, num_layers=6)
 
 #  4
 LOSS = None
@@ -70,13 +71,15 @@ schedule = schedule_list[SCHEDULE]
 
 #######
 train_batch_size = 20
-val_batch_size = 7
-epochs = 5
+val_batch_size = 20
+epochs = 3
 lr = 3e-5
 
 save_path = f'saved/{data_name}_{MODEL}_{d_model}_{HEAD}_'
 result_path = f'results/{data_name}_{MODEL}_{d_model}_{HEAD}_'
+print(save_path)
 model = Model(base_model, head)
+print('param num =', collect(model))
 train(DATA, model, data, lr, train_batch_size, val_batch_size, name, loss_fn, schedule, epochs, save_path)
 
 ########
