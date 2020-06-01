@@ -27,54 +27,53 @@ head_list = {'linear': LinearHead, 'cnn': CNNHead, 'transformer': TransformerHea
 schedule_list = {'linear_warmup': get_linear_schedule_with_warmup, 'cosine_warmup': get_cosine_schedule_with_warmup}
 parser = argparse.ArgumentParser()
 parser.add_argument("--seed", default=1024, type=int)
-parser.add_argument("--data", default='train', type=str, choices=['train', 'extended'])
+parser.add_argument("--data", default='data/train_folds.csv', type=str, choices=['data/train_folds.csv', 'data/extended_folds.csv'])
 parser.add_argument("--model", default='roberta', type=str, choices=list(model_list.keys()))
 parser.add_argument("--pretrained", default='roberta', type=str, choices=list(config.keys()))
 parser.add_argument("--head", default='linear', type=str, choices=list(head_list.keys()))
 parser.add_argument("--loss", default='ce', type=str)
-parser.add_argument("--lr", default=3e-5, type=float)
+parser.add_argument("--lr", default=2e-5, type=float)
 parser.add_argument("--schedule", default='linear_warmup', type=str, choices=['linear_warmup', 'cosine_warmup'])
-parser.add_argument("--batch_size", default=20, type=int)
-parser.add_argument("--epochs", default=3, type=int)
 parser.add_argument("--train", default=True, type=bool)
 
 args = parser.parse_args()
 
 print('CUDA_VISIBLE_DEVICES', os.environ["CUDA_VISIBLE_DEVICES"])
-print(args)
+
+
 #  0
-SEED = args.seed
+SEED = 1024
 seed_everything(SEED)
 
 #  1
-data_name = args.data
+data_name = 'extended'
 DATA = f'data/{data_name}_folds.csv'
 
 #  2
-MODEL = args.model
-name = args.pretrained
+MODEL = 'roberta'
+name = 'roberta'
 base_model = model_list[MODEL](name=name)
 data = data_list[MODEL]
 
 #  3
-HEAD = args.head
+HEAD = 'cnn'
 d_model = config[name]
 layers_used = 1
 head = head_list[HEAD](d_model, layers_used, num_layers=6)
 
 #  4
-LOSS = args.loss
+LOSS = None
 loss_fn = get_loss_fn(ce=1., jcd=0.)
 
 #  5
-SCHEDULE = args.schedule
+SCHEDULE = 'linear_warmup'
 schedule = schedule_list[SCHEDULE]
 
 #######
-train_batch_size = args.batch_size
-val_batch_size = 16
-epochs = args.epochs
-lr = args.lr
+train_batch_size = 20
+val_batch_size = 20
+epochs = 3
+lr = 3e-5
 
 save_path = f'saved/{data_name}_{MODEL}_{d_model}_{HEAD}_'
 result_path = f'results/{data_name}_{MODEL}_{d_model}_{HEAD}_'
