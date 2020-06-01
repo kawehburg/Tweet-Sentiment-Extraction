@@ -33,7 +33,7 @@ parser.add_argument("--head", default='linear', type=str, choices=list(head_list
 parser.add_argument("--loss", default='ce', type=str)
 parser.add_argument("--lr", default=2e-5, type=float)
 parser.add_argument("--schedule", default='linear_warmup', type=str, choices=['linear_warmup', 'cosine_warmup'])
-parser.add_argument("--train", default='on', type=str)
+parser.add_argument("--train", default=True, type=bool)
 
 args = parser.parse_args()
 
