@@ -1,7 +1,7 @@
 from tools.master import run, test, seed_everything, get_loss_fn, build_data, Model, collect
 from tools.master import BERTModel, ELECTRAModel, RoBERTaModel, Albert, Embedding
 from tools.master import BERTLoader, RoBERTaLoader, AlbertLoader
-from tools.master import LinearHead, CNNHead, TransformerHead
+from tools.master import LinearHead, CNNHead, TransformerHead, LSTMHead, GRUHead
 from transformers import get_cosine_schedule_with_warmup, get_linear_schedule_with_warmup
 import argparse
 import os
@@ -23,7 +23,7 @@ config = {'bert-base-uncased': 768, 'bert-large-uncased': 1024,
 data_list = {'bert': BERTLoader, 'electra': BERTLoader, 'roberta': RoBERTaLoader,
              'albert': AlbertLoader, 'embedding': BERTLoader}
 
-head_list = {'linear': LinearHead, 'cnn': CNNHead, 'transformer': TransformerHead}
+head_list = {'linear': LinearHead, 'cnn': CNNHead, 'transformer': TransformerHead, 'lstm': LSTMHead, 'gru': GRUHead}
 schedule_list = {'linear_warmup': get_linear_schedule_with_warmup, 'cosine_warmup': get_cosine_schedule_with_warmup}
 
 parser = argparse.ArgumentParser()
@@ -34,6 +34,7 @@ parser.add_argument("--model", default='roberta', type=str, choices=list(model_l
 parser.add_argument("--pretrained", default='roberta', type=str, choices=list(config.keys()))
 parser.add_argument("--head", default='linear', type=str, choices=list(head_list.keys()))
 parser.add_argument("--layer_used", default=2, type=int)
+parser.add_argument("--num_layers", default=2, type=int)
 parser.add_argument("--loss", default='ce', type=str)
 parser.add_argument("--lr", default=3e-5, type=float)
 parser.add_argument("--schedule", default='linear_warmup', type=str, choices=['linear_warmup', 'cosine_warmup'])
@@ -63,7 +64,8 @@ data = data_list[MODEL]
 HEAD = args.head
 d_model = config[name]
 layers_used = args.layer_used
-head = head_list[HEAD](d_model, layers_used, num_layers=6)
+num_layers = args.num_layers
+head = head_list[HEAD](d_model, layers_used, num_layers=num_layers)
 
 #  4
 LOSS = args.loss

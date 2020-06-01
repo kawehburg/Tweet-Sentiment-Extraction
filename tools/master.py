@@ -225,7 +225,6 @@ class RoBERTaLoader:
         )
         self.max_len = max_len
         self.tweet_id = tweet_id
-        
     
     def __len__(self):
         return len(self.tweet)
@@ -448,7 +447,7 @@ class AlbertLoader:
         for j, (offset1, offset2) in enumerate(tweet_offsets):
             if sum(char_targets[offset1: offset2]) > 0:
                 target_idx.append(j)
-                
+        
         try:
             targets_start = target_idx[0]
             targets_end = target_idx[-1]
@@ -563,6 +562,66 @@ class CNNHead(nn.Module):
         return start_logits, end_logits
 
 
+class LSTMHead(nn.Module):
+    def __init__(self, d_model, layers_used, num_layers=2):
+        super().__init__()
+        self.d_model = d_model
+        self.layers_used = layers_used
+        self.drop_out = nn.Dropout(0.1)
+        self.d = nn.Linear(d_model * layers_used, d_model)
+        self.lstm = nn.LSTM(d_model, d_model, num_layers=num_layers, bidirectional=True)
+        self.l0 = nn.Linear(d_model * 2, 2)
+        for param in self.lstm.parameters():
+            if param.data.dim() > 1:
+                xavier_uniform_(param.data)
+        xavier_uniform_(self.d.weight)
+        xavier_uniform_(self.l0.weight)
+    
+    def forward(self, out, mask=None):
+        mask = mask.ne(0)
+        out = [out[-i - 1] for i in range(self.layers_used)]
+        out = torch.cat(out, dim=-1)
+        out = self.drop_out(out)
+        out = self.d(out)
+        out = self.lstm(out.transpose(0, 1))[0].transpose(0, 1)
+        
+        logits = self.l0(out)
+        start_logits, end_logits = logits.split(1, dim=-1)
+        start_logits = start_logits.squeeze(-1)
+        end_logits = end_logits.squeeze(-1)
+        return start_logits, end_logits
+
+
+class GRUHead(nn.Module):
+    def __init__(self, d_model, layers_used, num_layers=2):
+        super().__init__()
+        self.d_model = d_model
+        self.layers_used = layers_used
+        self.drop_out = nn.Dropout(0.1)
+        self.d = nn.Linear(d_model * layers_used, d_model)
+        self.gru = nn.GRU(d_model, d_model, num_layers=num_layers, bidirectional=True)
+        self.l0 = nn.Linear(d_model * 2, 2)
+        for param in self.gru.parameters():
+            if param.data.dim() > 1:
+                xavier_uniform_(param.data)
+        xavier_uniform_(self.d.weight)
+        xavier_uniform_(self.l0.weight)
+    
+    def forward(self, out, mask=None):
+        mask = mask.ne(0)
+        out = [out[-i - 1] for i in range(self.layers_used)]
+        out = torch.cat(out, dim=-1)
+        out = self.drop_out(out)
+        out = self.d(out)
+        out = self.gru(out.transpose(0, 1))[0].transpose(0, 1)
+        
+        logits = self.l0(out)
+        start_logits, end_logits = logits.split(1, dim=-1)
+        start_logits = start_logits.squeeze(-1)
+        end_logits = end_logits.squeeze(-1)
+        return start_logits, end_logits
+
+
 class TransformerHead(nn.Module):
     def __init__(self, d_model, layers_used, num_layers=2):
         super().__init__()
@@ -578,6 +637,7 @@ class TransformerHead(nn.Module):
         for param in self.transformer.parameters():
             if param.data.dim() > 1:
                 xavier_uniform_(param.data)
+        xavier_uniform_(self.d.weight)
         xavier_uniform_(self.l0.weight)
     
     def forward(self, out, mask=None):
@@ -991,12 +1051,10 @@ def test(model, data_loader, SAVE_HEAD, MODE):
 def get_loss_fn(ce=1., jcd=0.):
     def f(start_logits, end_logits, start_positions, end_positions, mask=None):
         c_loss = ce_loss(start_logits, end_logits, start_positions, end_positions)
-        # use distance loss computed by jaccard score
         if jcd == 0:
             return c_loss
         d_loss = distance_loss(start_logits, end_logits, start_positions, end_positions, mask=mask)
         loss = ce * c_loss + jcd * d_loss
-        # loss = d_loss
         return loss
     
     return f
