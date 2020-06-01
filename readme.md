@@ -1,6 +1,6 @@
 # Tweet Sentiment Extraction
 
-这是Tweet Sentiment Extraction项目
+这是[Kaggle Tweet Sentiment Extraction](https://www.kaggle.com/c/tweet-sentiment-extraction)项目
 
 程序入口是agent.py
 
