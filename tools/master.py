@@ -655,6 +655,72 @@ class TransformerHead(nn.Module):
         return start_logits, end_logits
 
 
+class MixHead(nn.Module):
+    def __init__(self, d_model, layers_used, num_layers=2):
+        super().__init__()
+        self.d_model = d_model
+        self.layers_used = layers_used
+        self.drop_out = nn.Dropout(0.1)
+        
+        self.d0 = nn.Linear(d_model * layers_used, d_model)
+        self.transformer = nn.TransformerEncoder(
+            encoder_layer=nn.TransformerEncoderLayer(d_model=d_model, nhead=8, dim_feedforward=2048),
+            num_layers=num_layers,
+            norm=LayerNorm(d_model))
+        
+        self.d1 = nn.Linear(d_model * layers_used, d_model)
+        self.lstm = nn.LSTM(d_model, d_model, num_layers=num_layers, bidirectional=True)
+
+        self.cnn = nn.Sequential(
+            nn.Conv1d(d_model * layers_used, d_model * layers_used, 3, padding=1),
+            nn.LeakyReLU()
+        )
+        
+        self.l0 = nn.Linear(d_model * 3 + d_model * 2 * num_layers, 2)
+        
+        for param in self.transformer.parameters():
+            if param.data.dim() > 1:
+                xavier_uniform_(param.data)
+        for param in self.lstm.parameters():
+            if param.data.dim() > 1:
+                xavier_uniform_(param.data)
+        for param in self.cnn.parameters():
+            if param.data.dim() > 1:
+                xavier_uniform_(param.data)
+        xavier_uniform_(self.d0.weight)
+        xavier_uniform_(self.d1.weight)
+        xavier_uniform_(self.l0.weight)
+    
+    def forward(self, out, mask=None):
+        mask = mask.ne(0)
+        out = [out[-i - 1] for i in range(self.layers_used)]
+        out = torch.cat(out, dim=-1)
+        out = self.drop_out(out)
+        
+        out1 = self.d0(out)
+        out1 = self.transformer(out1.transpose(0, 1), src_key_padding_mask=~mask).transpose(0, 1)
+        
+        out2 = self.d1(out)
+        out2 = self.lstm(out2.transpose(0, 1))[0].transpose(0, 1)
+
+        out3 = out.permute(0, 2, 1)
+        tar_sz = out3.size()
+        out3 = self.cnn(out3).view(tar_sz)
+        out3 = out3.permute(0, 2, 1)
+
+        out4 = out
+        
+        out = torch.cat((out1, out2, out3, out4), dim=-1)
+        out = self.drop_out(out)
+        
+        logits = self.l0(out)
+        
+        start_logits, end_logits = logits.split(1, dim=-1)
+        start_logits = start_logits.squeeze(-1)
+        end_logits = end_logits.squeeze(-1)
+        return start_logits, end_logits
+
+
 def train_fn(data_loader, model, optimizer, device, loss_fn=None, scheduler=None):
     model.train()
     losses = utils.AverageMeter()
@@ -852,7 +918,7 @@ def build_data(path, builder, train_batch_size, val_batch_size, name):
     return data_loader
 
 
-def run(fold, path, data, model, batch_size, epochs, loss_fn, save_path, lr=3e-5, scheduler_fn=None, name='roberta'):
+def run(fold, path, data, model, batch_size, epochs, loss_fn, save_path, lr=3e-5, scheduler_fn=None, name='roberta', pretrained=False):
     dfx = pd.read_csv(path)
     df_train = dfx[dfx.kfold != fold].reset_index(drop=True)
     df_valid = dfx[dfx.kfold == fold].reset_index(drop=True)
@@ -891,6 +957,12 @@ def run(fold, path, data, model, batch_size, epochs, loss_fn, save_path, lr=3e-5
     device = torch.device("cuda")
     model = copy.deepcopy(model)
     model.to(device)
+    if pretrained:
+        try:
+            model.load_state_dict(torch.load(save_path + str(fold) + '.bin'))
+            print('load pretrained')
+        except:
+            print('load fail')
     num_train_steps = int(len(df_train) / batch_size * epochs)
     param_optimizer = list(model.named_parameters())
     no_decay = ["bias", "LayerNorm.bias", "LayerNorm.weight"]
