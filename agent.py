@@ -82,7 +82,12 @@ print(save_path)
 model = Model(base_model, head)
 print('param num =', collect(model))
 if args.train:
-    train(DATA, model, data, lr, train_batch_size, val_batch_size, name, loss_fn, schedule, epochs, save_path)
+    train(0, DATA, model, data, lr, train_batch_size, val_batch_size, name, loss_fn, schedule, epochs, save_path)
+    train(1, DATA, model, data, lr, train_batch_size, val_batch_size, name, loss_fn, schedule, epochs, save_path)
+    train(2, DATA, model, data, lr, train_batch_size, val_batch_size, name, loss_fn, schedule, epochs, save_path)
+    train(3, DATA, model, data, lr, train_batch_size, val_batch_size, name, loss_fn, schedule, epochs, save_path)
+    train(4, DATA, model, data, lr, train_batch_size, val_batch_size, name, loss_fn, schedule, epochs, save_path)
+    
 
 ########
 test_data = build_data("data/test.csv", data, train_batch_size, val_batch_size, name, fold=None)

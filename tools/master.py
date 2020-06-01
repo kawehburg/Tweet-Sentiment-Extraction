@@ -827,12 +827,12 @@ def run(fold, model, train_data_loader, valid_data_loader, loss_fn, lr, batch_si
             break
 
 
-def train(path, model, builder, lr, train_batch_size, val_batch_size, name, loss_fn, scheduler_fn, epochs, save_path):
-    model = copy.deepcopy(model)
-    for f in range(epochs):
-        train_data_loader, valid_data_loader = build_data(path, builder, train_batch_size, val_batch_size, name, f)
-        run(f, model, train_data_loader, valid_data_loader, loss_fn, lr, train_batch_size, scheduler_fn, epochs,
-            save_path)
+def train(f, path, model, builder, lr, train_batch_size, val_batch_size, name, loss_fn, scheduler_fn, epochs,
+          save_path):
+    train_model = copy.deepcopy(model)
+    train_data_loader, valid_data_loader = build_data(path, builder, train_batch_size, val_batch_size, name, f)
+    run(f, train_model, train_data_loader, valid_data_loader, loss_fn, lr, train_batch_size, scheduler_fn, epochs,
+        save_path)
 
 
 def test(model, data_loader, SAVE_HEAD, MODE):
