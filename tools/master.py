@@ -126,7 +126,7 @@ class Albert(nn.Module):
             ids,
             attention_mask=mask,
         )  # bert_layers x bs x SL x (768 * 2)
-        out = out[1]
+        out = out[2]
         return out
 
 
@@ -212,7 +212,7 @@ class RoBERTaLoader:
             'offsets': tweet_offsets,
         }
     
-    def __init__(self, tweet, sentiment, selected_text, name='roberta', max_len=192, **kwargs):
+    def __init__(self, tweet, sentiment, selected_text, tweet_id=None, name='roberta', max_len=192, **kwargs):
         self.tweet = tweet
         self.sentiment = sentiment
         self.selected_text = selected_text
@@ -224,6 +224,8 @@ class RoBERTaLoader:
             add_prefix_space=True
         )
         self.max_len = max_len
+        self.tweet_id = tweet_id
+        
     
     def __len__(self):
         return len(self.tweet)
@@ -239,6 +241,7 @@ class RoBERTaLoader:
         
         # Return the processed data where the lists are converted to `torch.tensor`s
         return {
+            'tweet_id': self.tweet_id[item],
             'ids': torch.tensor(data["ids"], dtype=torch.long),
             'mask': torch.tensor(data["mask"], dtype=torch.long),
             'token_type_ids': torch.tensor(data["token_type_ids"], dtype=torch.long),
@@ -277,10 +280,10 @@ class BERTLoader:
     @staticmethod
     def process_data(tweet, selected_text, sentiment, tokenizer, max_len):
         # handle special example
-        tweet = tweet.replace('ï¿½', '').replace(
+        tweet = tweet.replace('ï¿½', '').replace('¿½t', '').replace('ï', '').replace(
             'WOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOO',
             'WOOO')
-        selected_text = selected_text.replace('ï¿½', '').replace('ï', '').replace(
+        selected_text = selected_text.replace('ï¿½', '').replace('¿½t', '').replace('ï', '').replace(
             'WOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOO',
             'WOOO')
         
@@ -311,8 +314,15 @@ class BERTLoader:
         for j, (offset1, offset2) in enumerate(tweet_offsets):
             if sum(char_targets[offset1: offset2]) > 0:
                 target_idx.append(j)
-        targets_start = target_idx[0]
-        targets_end = target_idx[-1]
+        
+        try:
+            targets_start = target_idx[0]
+            targets_end = target_idx[-1]
+        except:
+            targets_start = 3
+            targets_end = len(input_ids)
+            print('>>', tweet)
+            print('>>', selected_text)
         
         padding_length = max_len - len(input_ids)
         if padding_length > 0:
@@ -333,7 +343,7 @@ class BERTLoader:
             'offsets': tweet_offsets,
         }
     
-    def __init__(self, tweet, sentiment, selected_text, max_len=192, name='bert-base-uncased'):
+    def __init__(self, tweet, sentiment, selected_text, tweet_id=None, max_len=192, name='bert-base-uncased'):
         self.tweet = tweet
         self.sentiment = sentiment
         self.selected_text = selected_text
@@ -342,6 +352,7 @@ class BERTLoader:
         except OSError:
             self.tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
         self.max_len = max_len
+        self.tweet_id = tweet_id
     
     def __len__(self):
         return len(self.tweet)
@@ -357,6 +368,7 @@ class BERTLoader:
         
         # Return the processed data where the lists are converted to `torch.tensor`s
         return {
+            'tweet_id': self.tweet_id[item],
             'ids': torch.tensor(data["ids"], dtype=torch.long),
             'mask': torch.tensor(data["mask"], dtype=torch.long),
             'token_type_ids': torch.tensor(data["token_type_ids"], dtype=torch.long),
@@ -436,8 +448,15 @@ class AlbertLoader:
         for j, (offset1, offset2) in enumerate(tweet_offsets):
             if sum(char_targets[offset1: offset2]) > 0:
                 target_idx.append(j)
-        targets_start = target_idx[0]
-        targets_end = target_idx[-1]
+                
+        try:
+            targets_start = target_idx[0]
+            targets_end = target_idx[-1]
+        except:
+            targets_start = 2
+            targets_end = len(input_ids)
+            print('>>', tweet)
+            print('>>', selected_text)
         
         padding_length = max_len - len(input_ids)
         if padding_length > 0:
@@ -458,12 +477,13 @@ class AlbertLoader:
             'offsets': tweet_offsets,
         }
     
-    def __init__(self, tweet, sentiment, selected_text, name='albert-xxlarge-v2', max_len=192):
+    def __init__(self, tweet, sentiment, selected_text, tweet_id=None, name='albert-xxlarge-v2', max_len=192):
         self.tweet = tweet
         self.sentiment = sentiment
         self.selected_text = selected_text
         self.tokenizer = AlbertTokenizer.from_pretrained(name)
         self.max_len = max_len
+        self.tweet_id = tweet_id
     
     def __len__(self):
         return len(self.tweet)
@@ -479,6 +499,7 @@ class AlbertLoader:
         
         # Return the processed data where the lists are converted to `torch.tensor`s
         return {
+            'tweet_id': self.tweet_id[item],
             'ids': torch.tensor(data["ids"], dtype=torch.long),
             'mask': torch.tensor(data["mask"], dtype=torch.long),
             'token_type_ids': torch.tensor(data["token_type_ids"], dtype=torch.long),
@@ -582,7 +603,7 @@ def train_fn(data_loader, model, optimizer, device, loss_fn=None, scheduler=None
     tk0 = tqdm(data_loader, total=len(data_loader), ncols=80)
     
     for bi, d in enumerate(tk0):
-        
+        tweet_id = d['tweet_id']
         ids = d["ids"]
         token_type_ids = d["token_type_ids"]
         mask = d["mask"]
@@ -628,7 +649,7 @@ def train_fn(data_loader, model, optimizer, device, loss_fn=None, scheduler=None
         
         # Calculate the jaccard score based on the predictions for this batch
         jaccard_scores = []
-        for px, tweet in enumerate(orig_tweet):
+        for px, (tweet_id, tweet) in enumerate(zip(tweet_id, orig_tweet)):
             selected_tweet = orig_selected[px]
             tweet_sentiment = sentiment[px]
             jaccard_score, _ = calculate_jaccard_score(
@@ -640,8 +661,8 @@ def train_fn(data_loader, model, optimizer, device, loss_fn=None, scheduler=None
                 idx_end=np.argmax(outputs_end[px, :]),  # Predicted end index for the px'th tweet in the batch
                 offsets=offsets[px]  # Offsets for each of the tokens for the px'th tweet in the batch
             )
-            # if tweet_sentiment == 'neutral':
-            #     continue
+            if 'new' in tweet_id:
+                continue
             jaccard_scores.append(jaccard_score)
         # Update the jaccard score and loss
         # For details, refer to `AverageMeter` in https://www.kaggle.com/abhishek/utils
@@ -650,6 +671,8 @@ def train_fn(data_loader, model, optimizer, device, loss_fn=None, scheduler=None
         losses.update(loss.item(), ids.size(0))
         # Print the average loss and jaccard score at the end of each batch
         tk0.set_postfix(loss=losses.avg, jaccard=jaccards.avg)
+        # if bi % 100 == 0:
+        #     print(bi, losses.avg, jaccards.avg)
 
 
 def calculate_jaccard_score(
@@ -685,6 +708,7 @@ def eval_fn(data_loader, model, device, loss_fn=None):
     with torch.no_grad():
         tk0 = tqdm(data_loader, total=len(data_loader), ncols=80)
         for bi, d in enumerate(tk0):
+            tweet_id = d['tweet_id']
             ids = d["ids"]
             token_type_ids = d["token_type_ids"]
             mask = d["mask"]
@@ -723,24 +747,30 @@ def eval_fn(data_loader, model, device, loss_fn=None):
             outputs_end = torch.softmax(outputs_end, dim=1).cpu().detach().numpy()
             # Calculate jaccard scores for each tweet in the batch
             jaccard_scores = []
-            for px, tweet in enumerate(orig_tweet):
+            for px, (tweet_id, tweet) in enumerate(zip(tweet_id, orig_tweet)):
                 selected_tweet = orig_selected[px]
                 tweet_sentiment = sentiment[px]
                 jaccard_score, _ = calculate_jaccard_score(
-                    original_tweet=tweet,
+                    original_tweet=tweet,  # Full text of the px'th tweet in the batch
                     target_string=selected_tweet,
-                    sentiment_val=tweet_sentiment,
-                    idx_start=np.argmax(outputs_start[px, :]),
-                    idx_end=np.argmax(outputs_end[px, :]),
-                    offsets=offsets[px]
+                    # Span containing the specified sentiment for the px'th tweet in the batch
+                    sentiment_val=tweet_sentiment,  # Sentiment of the px'th tweet in the batch
+                    idx_start=np.argmax(outputs_start[px, :]),  # Predicted start index for the px'th tweet in the batch
+                    idx_end=np.argmax(outputs_end[px, :]),  # Predicted end index for the px'th tweet in the batch
+                    offsets=offsets[px]  # Offsets for each of the tokens for the px'th tweet in the batch
                 )
+                if 'new' in tweet_id:
+                    continue
                 jaccard_scores.append(jaccard_score)
-            
-            # Update running jaccard score and loss
-            jaccards.update(np.mean(jaccard_scores), ids.size(0))
+            # Update the jaccard score and loss
+            # For details, refer to `AverageMeter` in https://www.kaggle.com/abhishek/utils
+            avg = np.mean(jaccard_scores) if len(jaccard_scores) else 0
+            jaccards.update(avg, len(jaccard_scores))
             losses.update(loss.item(), ids.size(0))
-            # Print the running average loss and jaccard score
+            # Print the average loss and jaccard score at the end of each batch
             tk0.set_postfix(loss=losses.avg, jaccard=jaccards.avg)
+            # if bi % 100 == 0:
+            #     print(bi, losses.avg, jaccards.avg)
     
     print(f"Jaccard = {jaccards.avg}")
     return jaccards.avg
@@ -770,6 +800,7 @@ def run(fold, path, data, model, batch_size, epochs, loss_fn, save_path, lr=3e-5
         tweet=df_train.text.values,
         sentiment=df_train.sentiment.values,
         selected_text=df_train.selected_text.values,
+        tweet_id=df_train.textID.values,
         name=name
     )
     
@@ -786,20 +817,20 @@ def run(fold, path, data, model, batch_size, epochs, loss_fn, save_path, lr=3e-5
         tweet=df_valid.text.values,
         sentiment=df_valid.sentiment.values,
         selected_text=df_valid.selected_text.values,
+        tweet_id=df_valid.textID.values,
         name=name
     )
     
     # Instantiate DataLoader with `valid_dataset`
     valid_data_loader = torch.utils.data.DataLoader(
         valid_dataset,
-        batch_size=20,
+        batch_size=batch_size,
         num_workers=2
     )
     
     device = torch.device("cuda")
     model = copy.deepcopy(model)
     model.to(device)
-    print(collect(model))
     num_train_steps = int(len(df_train) / batch_size * epochs)
     param_optimizer = list(model.named_parameters())
     no_decay = ["bias", "LayerNorm.bias", "LayerNorm.weight"]

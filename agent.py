@@ -73,7 +73,7 @@ schedule = schedule_list[SCHEDULE]
 
 #######
 train_batch_size = args.batch_size
-val_batch_size = 16
+val_batch_size = train_batch_size
 epochs = args.epochs
 lr = args.lr
 
