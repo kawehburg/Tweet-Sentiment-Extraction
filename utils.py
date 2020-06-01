@@ -24,7 +24,10 @@ class AverageMeter:
         
         self.sum += val * n
         self.count += n
-        self.avg = self.sum / self.count
+        try:
+            self.avg = self.sum / self.count
+        except:
+            pass
 
 
 class EarlyStopping:
