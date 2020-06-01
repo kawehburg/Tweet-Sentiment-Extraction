@@ -45,7 +45,8 @@ SEED = 1024
 seed_everything(SEED)
 
 #  1
-DATA = 'data/extended_folds.csv'
+data_name = 'extended'
+DATA = f'data/{data_name}_folds.csv'
 
 #  2
 MODEL = 'roberta'
@@ -73,8 +74,8 @@ val_batch_size = 7
 epochs = 5
 lr = 3e-5
 
-save_path = f'saved/{MODEL}_{d_model}_{HEAD}_'
-result_path = f'results/{MODEL}_{d_model}_{HEAD}_'
+save_path = f'saved/{data_name}_{MODEL}_{d_model}_{HEAD}_'
+result_path = f'results/{data_name}_{MODEL}_{d_model}_{HEAD}_'
 model = Model(base_model, head)
 train(DATA, model, data, lr, train_batch_size, val_batch_size, name, loss_fn, schedule, epochs, save_path)
 
