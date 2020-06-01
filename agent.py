@@ -81,7 +81,8 @@ result_path = f'results/{data_name}_{MODEL}_{d_model}_{HEAD}_'
 print(save_path)
 model = Model(base_model, head)
 print('param num =', collect(model))
-train(DATA, model, data, lr, train_batch_size, val_batch_size, name, loss_fn, schedule, epochs, save_path)
+if args.train:
+    train(DATA, model, data, lr, train_batch_size, val_batch_size, name, loss_fn, schedule, epochs, save_path)
 
 ########
 test_data = build_data("data/test.csv", data, train_batch_size, val_batch_size, name, fold=None)
