@@ -1,29 +1,32 @@
 from tools.master import run, test, seed_everything, get_loss_fn, build_data, Model, collect
-from tools.master import BERTModel, ELECTRAModel, RoBERTaModel, Albert, Embedding
-from tools.master import BERTLoader, RoBERTaLoader, AlbertLoader
-from tools.master import LinearHead, CNNHead, TransformerHead
+from tools.master import BERTModel, ELECTRAModel, RoBERTaModel, Albert, Embedding, XLNet
+from tools.master import BERTLoader, RoBERTaLoader, AlbertLoader, XLNetLoader
+from tools.master import LinearHead, CNNHead, TransformerHead, LSTMHead, GRUHead, MixHead, SpanHead, SpanCNNHead, SpanMixHead
 from transformers import get_cosine_schedule_with_warmup, get_linear_schedule_with_warmup
 import argparse
 import os
 
 model_list = {'bert': BERTModel, 'electra': ELECTRAModel, 'roberta': RoBERTaModel,
-              'albert': Albert, 'embedding': Embedding}
-pretrained_list = {'bert': ['bert-base-uncased', 'bert-large-uncased'],
+              'albert': Albert, 'embedding': Embedding, 'xlnet': XLNet}
+pretrained_list = {'bert': ['bert-base-uncased', 'bert-large-uncased', 'bert-base-cased'],
                    'electra': ['google/electra-base-discriminator', 'google/electra-large-discriminator'],
                    'roberta': ['roberta'],
                    'albert': ['albert-base-v2', 'albert-large-v2', 'albert-xlarge-v2', 'albert-xxlarge-v2'],
-                   'embedding': ['embedding']}
-config = {'bert-base-uncased': 768, 'bert-large-uncased': 1024,
+                   'embedding': ['embedding'],
+                   'xlnet': ['xlnet-base-cased', 'xlnet-large-cased']}
+config = {'bert-base-uncased': 768, 'bert-large-uncased': 1024, 'bert-base-cased': 768,
           'google/electra-base-discriminator': 768, 'google/electra-large-discriminator': 1024,
           'roberta': 768,
           'albert-base-v2': 768, 'albert-large-v2': 1024, 'albert-xlarge-v2': 2048, 'albert-xxlarge-v2': 4096,
-          'embedding': 256
+          'embedding': 256,
+          'xlnet-base-cased': 768, 'xlnet-large-cased': 1024
           }
 
 data_list = {'bert': BERTLoader, 'electra': BERTLoader, 'roberta': RoBERTaLoader,
-             'albert': AlbertLoader, 'embedding': BERTLoader}
+             'albert': AlbertLoader, 'embedding': BERTLoader, 'xlnet': XLNetLoader}
 
-head_list = {'linear': LinearHead, 'cnn': CNNHead, 'transformer': TransformerHead}
+head_list = {'linear': LinearHead, 'cnn': CNNHead, 'transformer': TransformerHead, 'lstm': LSTMHead, 'gru': GRUHead,
+             'mix': MixHead, 'span_linear': SpanHead, 'span_cnn': SpanCNNHead, 'span_mix': SpanMixHead}
 schedule_list = {'linear_warmup': get_linear_schedule_with_warmup, 'cosine_warmup': get_cosine_schedule_with_warmup}
 parser = argparse.ArgumentParser()
 parser.add_argument("--seed", default=1024, type=int)
@@ -50,30 +53,29 @@ data_name = 'train'
 DATA = f'data/{data_name}_folds.csv'
 
 #  2
-MODEL = 'roberta'
-name = 'roberta'
+MODEL = 'bert'
+name = 'bert-base-uncased'
 base_model = model_list[MODEL](name=name)
 data = data_list[MODEL]
 
 #  3
-HEAD = 'linear'
+HEAD = 'span_mix'
 d_model = config[name]
 layers_used = 2
-head = head_list[HEAD](d_model, layers_used, num_layers=6)
+head = head_list[HEAD](d_model, layers_used, num_layers=2)
 
 #  4
 LOSS = None
-loss_fn = get_loss_fn(ce=1., jcd=0.)
+loss_fn = get_loss_fn(ce=0.5, jcd=0., span=0.5)
 
 #  5
-SCHEDULE = 'linear_warmup'
+SCHEDULE = 'cosine_warmup'
 schedule = schedule_list[SCHEDULE]
 
 #######
 train_batch_size = 20
-val_batch_size = 20
 epochs = 3
-lr = 3e-5
+lr = 4e-5
 
 save_path = f'saved/{data_name}_{MODEL}_{d_model}_{HEAD}_'
 result_path = f'results/{data_name}_{MODEL}_{d_model}_{HEAD}_'
@@ -88,6 +90,7 @@ run(3, DATA, data, model, train_batch_size, epochs, loss_fn, save_path, lr=lr, s
 run(4, DATA, data, model, train_batch_size, epochs, loss_fn, save_path, lr=lr, scheduler_fn=schedule, name=name)
 
 ########
+val_batch_size = train_batch_size
 test_data = build_data("data/test.csv", data, train_batch_size, val_batch_size, name)
 test(model, test_data, save_path, result_path)
 

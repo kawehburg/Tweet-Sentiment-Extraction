@@ -154,8 +154,8 @@ class Model(nn.Module):
     
     def forward(self, ids, mask, token_type_ids):
         out = self.base_model(ids, mask, token_type_ids)
-        start_logits, end_logits = self.head(out, mask)
-        return start_logits, end_logits
+        output = self.head(out, mask)
+        return output
 
 
 class RoBERTaLoader:
@@ -440,7 +440,7 @@ class AlbertLoader:
         encoding = tokenizer.encode_plus(question, text)
         input_ids, token_type_ids = encoding["input_ids"], encoding["token_type_ids"]
         mask = [1] * len(token_type_ids)
-        tweet_offsets = AlbertLoader.get_offsets(tweet, tokenizer.convert_ids_to_tokens(input_ids)[1:-1], ignore=2)
+        tweet_offsets = AlbertLoader.get_offsets(tweet, tokenizer.convert_ids_to_tokens(input_ids)[1:-1], ignore=1)
         tweet_offsets = [(0, 0)] + tweet_offsets + [(0, 0)]
         
         len_st = len(selected_text) - 1
@@ -678,7 +678,7 @@ class LinearHead(nn.Module):
         start_logits, end_logits = logits.split(1, dim=-1)
         start_logits = start_logits.squeeze(-1)
         end_logits = end_logits.squeeze(-1)
-        return start_logits, end_logits
+        return {'start_logits': start_logits, 'end_logits': end_logits}
 
 
 class CNNHead(nn.Module):
@@ -709,7 +709,7 @@ class CNNHead(nn.Module):
         start_logits, end_logits = logits.split(1, dim=-1)
         start_logits = start_logits.squeeze(-1)
         end_logits = end_logits.squeeze(-1)
-        return start_logits, end_logits
+        return {'start_logits': start_logits, 'end_logits': end_logits}
 
 
 class LSTMHead(nn.Module):
@@ -739,7 +739,7 @@ class LSTMHead(nn.Module):
         start_logits, end_logits = logits.split(1, dim=-1)
         start_logits = start_logits.squeeze(-1)
         end_logits = end_logits.squeeze(-1)
-        return start_logits, end_logits
+        return {'start_logits': start_logits, 'end_logits': end_logits}
 
 
 class GRUHead(nn.Module):
@@ -769,7 +769,7 @@ class GRUHead(nn.Module):
         start_logits, end_logits = logits.split(1, dim=-1)
         start_logits = start_logits.squeeze(-1)
         end_logits = end_logits.squeeze(-1)
-        return start_logits, end_logits
+        return {'start_logits': start_logits, 'end_logits': end_logits}
 
 
 class TransformerHead(nn.Module):
@@ -802,7 +802,7 @@ class TransformerHead(nn.Module):
         start_logits, end_logits = logits.split(1, dim=-1)
         start_logits = start_logits.squeeze(-1)
         end_logits = end_logits.squeeze(-1)
-        return start_logits, end_logits
+        return {'start_logits': start_logits, 'end_logits': end_logits}
 
 
 class MixHead(nn.Module):
@@ -868,8 +868,158 @@ class MixHead(nn.Module):
         start_logits, end_logits = logits.split(1, dim=-1)
         start_logits = start_logits.squeeze(-1)
         end_logits = end_logits.squeeze(-1)
-        return start_logits, end_logits
+        return {'start_logits': start_logits, 'end_logits': end_logits}
 
+
+class SpanHead(nn.Module):
+    def __init__(self, d_model, layers_used, num_layers=2):
+        super().__init__()
+        self.d_model = d_model
+        self.layers_used = layers_used
+        self.drop_out = nn.Dropout(0.1)
+        self.l0 = nn.Linear(d_model * layers_used, 2)
+        self.l1 = nn.Linear(d_model * layers_used, 1)
+        torch.nn.init.normal_(self.l0.weight, std=0.02)
+        torch.nn.init.normal_(self.l1.weight, std=0.02)
+    
+    def forward(self, out, mask):
+        out = [out[-i - 1] for i in range(self.layers_used)]
+        out = torch.cat(out, dim=-1)
+        out = self.drop_out(out)
+        
+        span = self.l1(out)
+        span = torch.sigmoid(span)
+        
+        logits = self.l0(out)
+        start_logits, end_logits = logits.split(1, dim=-1)
+        start_logits = start_logits.squeeze(-1)
+        end_logits = end_logits.squeeze(-1)
+        
+        return {'start_logits': start_logits, 'end_logits': end_logits, 'span': span}
+
+
+class SpanCNNHead(nn.Module):
+    def __init__(self, d_model, layers_used, num_layers=2):
+        super().__init__()
+        self.d_model = d_model
+        self.layers_used = layers_used
+        self.drop_out = nn.Dropout(0.1)
+        self.cnn = nn.Sequential(
+            nn.Conv1d(d_model * layers_used, d_model * layers_used, 3, padding=1),
+            nn.LeakyReLU()
+        )
+        self.l0 = nn.Linear(d_model * layers_used + 2, 2)
+        self.cnn1 = nn.Sequential(
+            nn.Conv1d(d_model * layers_used, d_model * layers_used, 3, padding=1),
+            nn.LeakyReLU()
+        )
+        self.l1 = nn.Linear(d_model * layers_used, 1)
+        
+        self.cnn2 = nn.Sequential(
+            nn.Conv1d(1, 2, 3, padding=1),
+            nn.LeakyReLU()
+        )
+        
+        for param in self.cnn.parameters():
+            if param.data.dim() > 1:
+                xavier_uniform_(param.data)
+        xavier_uniform_(self.l0.weight)
+        for param in self.cnn1.parameters():
+            if param.data.dim() > 1:
+                xavier_uniform_(param.data)
+        for param in self.cnn2.parameters():
+            if param.data.dim() > 1:
+                xavier_uniform_(param.data)
+        xavier_uniform_(self.l1.weight)
+    
+    def forward(self, out, mask=None):
+        out = [out[-i - 1] for i in range(self.layers_used)]
+        out = torch.cat(out, dim=-1)  # bs x SL x (768 * 2)
+        out = self.drop_out(out)  # bs x SL x (768 * 2)
+        out = out.permute(0, 2, 1)
+        tar_sz = out.size()
+        
+        out1 = self.cnn1(out).view(tar_sz)
+        out1 = out1.permute(0, 2, 1)
+        span = self.l1(out1)
+        span = torch.sigmoid(span)
+        
+        span_used = self.cnn2(span.permute(0, 2, 1)).view(tar_sz[0], 2, tar_sz[2]).permute(0, 2, 1)
+        
+        out0 = self.cnn(out).view(tar_sz)
+        out0 = out0.permute(0, 2, 1)
+        out0 = self.drop_out(out0)
+        
+        out0 = torch.cat([out0, span_used], dim=-1)
+        logits = self.l0(out0)
+        
+        start_logits, end_logits = logits.split(1, dim=-1)
+        start_logits = start_logits.squeeze(-1)
+        end_logits = end_logits.squeeze(-1)
+        
+        return {'start_logits': start_logits, 'end_logits': end_logits, 'span': span}
+
+
+class SpanMixHead(nn.Module):
+    def __init__(self, d_model, layers_used, num_layers=2):
+        super().__init__()
+        self.d_model = d_model
+        self.layers_used = layers_used
+        self.drop_out = nn.Dropout(0.1)
+        
+        self.d0 = nn.Linear(d_model * layers_used, 1)
+        
+        self.d1 = nn.Linear(d_model * layers_used, d_model)
+        self.lstm = nn.LSTM(d_model, d_model, num_layers=num_layers, bidirectional=True)
+        self.gru = nn.GRU(d_model, d_model, num_layers=num_layers, bidirectional=True)
+        self.cnn = nn.Sequential(
+            nn.Conv1d(d_model * layers_used, d_model * layers_used, 3, padding=1),
+            nn.LeakyReLU()
+        )
+        
+        self.l0 = nn.Linear(d_model * 4 + d_model * 2 * num_layers, 2)
+        for param in self.lstm.parameters():
+            if param.data.dim() > 1:
+                xavier_uniform_(param.data)
+        for param in self.gru.parameters():
+            if param.data.dim() > 1:
+                xavier_uniform_(param.data)
+        for param in self.cnn.parameters():
+            if param.data.dim() > 1:
+                xavier_uniform_(param.data)
+        xavier_uniform_(self.d0.weight)
+        xavier_uniform_(self.d1.weight)
+        xavier_uniform_(self.l0.weight)
+    
+    def forward(self, out, mask=None):
+        mask = mask.ne(0)
+        out = [out[-i - 1] for i in range(self.layers_used)]
+        out = torch.cat(out, dim=-1)
+        out = self.drop_out(out)
+        
+        span = self.d0(out)
+        span = torch.sigmoid(span)
+        
+        out2 = self.d1(out)
+        out1 = self.gru(out2.transpose(0, 1))[0].transpose(0, 1)
+        out2 = self.lstm(out2.transpose(0, 1))[0].transpose(0, 1)
+        
+        out3 = out.permute(0, 2, 1)
+        tar_sz = out3.size()
+        out3 = self.cnn(out3).view(tar_sz)
+        out3 = out3.permute(0, 2, 1)
+        
+        out4 = out
+        
+        out = torch.cat((out1, out2, out3, out4), dim=-1)
+        out = self.drop_out(out)
+        
+        logits = self.l0(out)
+        
+        start_logits, end_logits = logits.split(1, dim=-1)
+        start_logits = start_logits.squeeze(-1)
+        end_logits = end_logits.squeeze(-1)
+        return {'start_logits': start_logits, 'end_logits': end_logits, 'span': span}
 
 def train_fn(data_loader, model, optimizer, device, loss_fn=None, scheduler=None):
     model.train()
@@ -903,13 +1053,15 @@ def train_fn(data_loader, model, optimizer, device, loss_fn=None, scheduler=None
         model.zero_grad()
         # Use ids, masks, and token types as input to the model
         # Predict logits for each of the input tokens for each batch
-        outputs_start, outputs_end = model(
+        output = model(
             ids=ids,
             mask=mask,
             token_type_ids=token_type_ids,
         )  # (bs x SL), (bs x SL)
+        outputs_start = output['start_logits']
+        outputs_end = output['end_logits']
         # Calculate batch loss based on CrossEntropy
-        loss = loss_fn(outputs_start, outputs_end, targets_start, targets_end, mask)
+        loss = loss_fn(outputs_start, outputs_end, targets_start, targets_end, mask, output)
         # Calculate gradients based on loss
         loss.backward()
         # Adjust weights based on calculated gradients
@@ -1010,13 +1162,15 @@ def eval_fn(data_loader, model, device, loss_fn=None):
             targets_end = targets_end.to(device, dtype=torch.long)
             
             # Predict logits for start and end indexes
-            outputs_start, outputs_end = model(
+            output = model(
                 ids=ids,
                 mask=mask,
                 token_type_ids=token_type_ids
             )
+            outputs_start = output['start_logits']
+            outputs_end = output['end_logits']
             # Calculate loss for the batch
-            loss = loss_fn(outputs_start, outputs_end, targets_start, targets_end, mask)
+            loss = loss_fn(outputs_start, outputs_end, targets_start, targets_end, mask, output)
             # Apply softmax to the predicted logits for the start and end indexes
             # This converts the "logits" to "probability-like" scores
             outputs_start = torch.softmax(outputs_start, dim=1).cpu().detach().numpy()
@@ -1140,6 +1294,13 @@ def run(fold, path, data, model, batch_size, epochs, loss_fn, save_path, lr=3e-5
             break
 
 
+def train_folds(folds, path, data, model, batch_size, epochs, loss_fn, save_path, lr=3e-5, scheduler_fn=None,
+                name='roberta', pretrained=False):
+    for fold in range(folds):
+        run(fold, path, data, model, batch_size, epochs, loss_fn, save_path, lr=lr, scheduler_fn=scheduler_fn, name=name,
+            pretrained=pretrained)
+
+
 def test(model, data_loader, SAVE_HEAD, MODE):
     device = torch.device("cuda")
     
@@ -1192,35 +1353,45 @@ def test(model, data_loader, SAVE_HEAD, MODE):
             targets_end = targets_end.to(device, dtype=torch.long)
             
             # Predict start and end logits for each of the five models
-            outputs_start1, outputs_end1 = model1(
+            output1 = model1(
                 ids=ids,
                 mask=mask,
                 token_type_ids=token_type_ids
             )
+            outputs_start1 = output1['start_logits']
+            outputs_end1 = output1['end_logits']
             
-            outputs_start2, outputs_end2 = model2(
+            output2 = model2(
                 ids=ids,
                 mask=mask,
                 token_type_ids=token_type_ids
             )
+            outputs_start2 = output2['start_logits']
+            outputs_end2 = output2['end_logits']
             
-            outputs_start3, outputs_end3 = model3(
+            output3 = model3(
                 ids=ids,
                 mask=mask,
                 token_type_ids=token_type_ids
             )
+            outputs_start3 = output3['start_logits']
+            outputs_end3 = output3['end_logits']
             
-            outputs_start4, outputs_end4 = model4(
+            output4 = model4(
                 ids=ids,
                 mask=mask,
                 token_type_ids=token_type_ids
             )
+            outputs_start4 = output4['start_logits']
+            outputs_end4 = output4['end_logits']
             
-            outputs_start5, outputs_end5 = model5(
+            output5 = model5(
                 ids=ids,
                 mask=mask,
                 token_type_ids=token_type_ids
             )
+            outputs_start5 = output5['start_logits']
+            outputs_end5 = output5['end_logits']
             
             # Get the average start and end logits across the five models and use these as predictions
             # This is a form of "ensembling"
@@ -1271,13 +1442,102 @@ def test(model, data_loader, SAVE_HEAD, MODE):
     sample.head()
 
 
-def get_loss_fn(ce=1., jcd=0., **kwargs):
-    def f(start_logits, end_logits, start_positions, end_positions, mask=None):
+def test_folds(folds, model, data_loader, SAVE_HEAD, MODE):
+    device = torch.device("cuda")
+    
+    # Load each of the five trained models and move to GPU
+    ensemble = nn.ModuleList([])
+    for i in range(folds):
+        _model = copy.deepcopy(model)
+        _model.to(device)
+        _model.load_state_dict(torch.load(SAVE_HEAD + str(i) + '.bin'))
+        _model.eval()
+        ensemble.append(_model)
+    
+    final_output = []
+    
+    with torch.no_grad():
+        tk0 = tqdm(data_loader, total=len(data_loader), ncols=80)
+        # Predict the span containing the sentiment for each batch
+        for bi, d in enumerate(tk0):
+            ids = d["ids"]
+            token_type_ids = d["token_type_ids"]
+            mask = d["mask"]
+            sentiment = d["sentiment"]
+            orig_selected = d["orig_selected"]
+            orig_tweet = d["orig_tweet"]
+            targets_start = d["targets_start"]
+            targets_end = d["targets_end"]
+            offsets = d["offsets"].numpy()
+            
+            ids = ids.to(device, dtype=torch.long)
+            token_type_ids = token_type_ids.to(device, dtype=torch.long)
+            mask = mask.to(device, dtype=torch.long)
+            targets_start = targets_start.to(device, dtype=torch.long)
+            targets_end = targets_end.to(device, dtype=torch.long)
+            
+            # Predict start and end logits for each of the five models
+            output = []
+            output_start_list = []
+            output_end_list = []
+            for i, m in enumerate(ensemble):
+                _output = m(ids=ids, mask=mask, token_type_ids=token_type_ids)
+                _outputs_start = _output['start_logits']
+                _outputs_end = _output['end_logits']
+                output.append(_output)
+                output_start_list.append(_outputs_start)
+                output_end_list.append(_outputs_end)
+            
+            # Get the average start and end logits across the five models and use these as predictions
+            # This is a form of "ensembling"
+            outputs_start = output_start_list[0]
+            outputs_end = output_end_list[0]
+            for i in range(1, len(output_start_list)):
+                outputs_start = outputs_start + output_start_list[i]
+                outputs_end = outputs_end + output_end_list[i]
+            outputs_start = outputs_start / folds
+            outputs_end = outputs_end / folds
+            
+            # Apply softmax to the predicted start and end logits
+            outputs_start = torch.softmax(outputs_start, dim=1).cpu().detach().numpy()
+            outputs_end = torch.softmax(outputs_end, dim=1).cpu().detach().numpy()
+            
+            # Convert the start and end scores to actual predicted spans (in string form)
+            for px, tweet in enumerate(orig_tweet):
+                selected_tweet = orig_selected[px]
+                tweet_sentiment = sentiment[px]
+                _, output_sentence = calculate_jaccard_score(
+                    original_tweet=tweet,
+                    target_string=selected_tweet,
+                    sentiment_val=tweet_sentiment,
+                    idx_start=np.argmax(outputs_start[px, :]),
+                    idx_end=np.argmax(outputs_end[px, :]),
+                    offsets=offsets[px]
+                )
+                final_output.append(output_sentence)
+    
+    # post-process trick:
+    # Note: This trick comes from: https://www.kaggle.com/c/tweet-sentiment-extraction/discussion/140942
+    # When the LB resets, this trick won't help
+    def post_process(selected):
+        return " ".join(set(selected.lower().split()))
+    
+    sample = pd.read_csv("data/sample_submission.csv")
+    sample.loc[:, 'selected_text'] = final_output
+    sample.selected_text = sample.selected_text.map(post_process)
+    sample.to_csv(MODE + "submission.csv", index=False)
+    
+    sample.head()
+
+
+def get_loss_fn(ce=1., jcd=0., span=0., **kwargs):
+    def f(start_logits, end_logits, start_positions, end_positions, mask=None, output=None):
         c_loss = ce_loss(start_logits, end_logits, start_positions, end_positions)
-        if jcd == 0:
-            return c_loss
-        d_loss = distance_loss(start_logits, end_logits, start_positions, end_positions, mask=mask)
-        loss = ce * c_loss + jcd * d_loss
+        loss = ce * c_loss
+        if jcd != 0:
+            loss = loss + jcd * distance_loss(start_logits, end_logits, start_positions, end_positions, mask=mask)
+        if span != 0:
+            loss = loss + span * span_loss(start_positions, end_positions, mask, output)
         return loss
     
     return f
@@ -1288,14 +1548,6 @@ def ce_loss(start_logits, end_logits, start_positions, end_positions, mask=None)
         Return the sum of the cross entropy losses for both the start and end logits
         """
     loss_fct = nn.CrossEntropyLoss()
-    start_loss = loss_fct(start_logits, start_positions)
-    end_loss = loss_fct(end_logits, end_positions)
-    total_loss = (start_loss + end_loss)
-    return total_loss
-
-
-def kl_loss(start_logits, end_logits, start_positions, end_positions, gama):
-    loss_fct = nn.KLDivLoss()
     start_loss = loss_fct(start_logits, start_positions)
     end_loss = loss_fct(end_logits, end_positions)
     total_loss = (start_loss + end_loss)
@@ -1339,6 +1591,17 @@ def distance_loss(start_logits, end_logits, start_positions, end_positions, mask
     end_loss = -(F.log_softmax(end_logits, dim=-1) * end_score[:, :end_logits.size(1)]).mean()
     total_loss = (start_loss + end_loss) / 2
     return total_loss
+
+
+def span_loss(start_positions, end_positions, mask, output):
+    span = output['span']
+    bc_size = span.size(0)
+    target = torch.zeros_like(span)
+    for b in range(bc_size):
+        target[b][start_positions[b]:end_positions[b]] = 1.
+    target = target.to(span.device)
+    loss = F.binary_cross_entropy(span, target)
+    return loss
 
 
 def collect(model):
