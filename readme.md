@@ -13,7 +13,7 @@
 - --head：HEAD模型，default=linear
 - --layer_used：使用几层输出，default=2
 - --num_layers：head层数，default=2
-- --loss：loss设置，default=ce
+- --loss：loss设置，default=ce=1.,jcd=0.
 - --lr：学习率，default=3e-5
 - --schedule：学习率策略，default=linear_warmup
 - --batch_size：batch size，default=20
@@ -24,6 +24,6 @@
 
 
 ```
-python agent.py --seed=1024 --data=train --model=roberta --pretrained=roberta --head=linear --layer_used=2 --num_layers=2 --loss=ce --lr=3e-5 --schedule=linear_warmup --batch_size=20 --epochs=3 --train=true
+python agent.py --seed=1024 --data=train --model=roberta --pretrained=roberta --head=linear --layer_used=2 --num_layers=2 --loss=ce=1.,jcd=0. --lr=3e-5 --schedule=linear_warmup --batch_size=20 --epochs=3 --train=true
 ```
 

@@ -670,7 +670,7 @@ class MixHead(nn.Module):
         
         self.d1 = nn.Linear(d_model * layers_used, d_model)
         self.lstm = nn.LSTM(d_model, d_model, num_layers=num_layers, bidirectional=True)
-
+        
         self.cnn = nn.Sequential(
             nn.Conv1d(d_model * layers_used, d_model * layers_used, 3, padding=1),
             nn.LeakyReLU()
@@ -702,12 +702,12 @@ class MixHead(nn.Module):
         
         out2 = self.d1(out)
         out2 = self.lstm(out2.transpose(0, 1))[0].transpose(0, 1)
-
+        
         out3 = out.permute(0, 2, 1)
         tar_sz = out3.size()
         out3 = self.cnn(out3).view(tar_sz)
         out3 = out3.permute(0, 2, 1)
-
+        
         out4 = out
         
         out = torch.cat((out1, out2, out3, out4), dim=-1)
@@ -918,7 +918,8 @@ def build_data(path, builder, train_batch_size, val_batch_size, name):
     return data_loader
 
 
-def run(fold, path, data, model, batch_size, epochs, loss_fn, save_path, lr=3e-5, scheduler_fn=None, name='roberta', pretrained=False):
+def run(fold, path, data, model, batch_size, epochs, loss_fn, save_path, lr=3e-5, scheduler_fn=None, name='roberta',
+        pretrained=False):
     dfx = pd.read_csv(path)
     df_train = dfx[dfx.kfold != fold].reset_index(drop=True)
     df_valid = dfx[dfx.kfold == fold].reset_index(drop=True)
@@ -1199,3 +1200,13 @@ def collect(model):
             s_ *= ax_
         param_num += s_
     return param_num
+
+
+def decode_exp(exp):
+    exp = exp.split(',')
+    m = {}
+    for e in exp:
+        e = e.split('=')
+        if len(e) == 2:
+            m[e[0]] = float(e[1])
+    return m

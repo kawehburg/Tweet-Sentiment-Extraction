@@ -1,7 +1,7 @@
-from tools.master import run, test, seed_everything, get_loss_fn, build_data, Model, collect
+from tools.master import run, test, seed_everything, get_loss_fn, build_data, Model, collect, decode_exp
 from tools.master import BERTModel, ELECTRAModel, RoBERTaModel, Albert, Embedding
 from tools.master import BERTLoader, RoBERTaLoader, AlbertLoader
-from tools.master import LinearHead, CNNHead, TransformerHead, LSTMHead, GRUHead
+from tools.master import LinearHead, CNNHead, TransformerHead, LSTMHead, GRUHead, MixHead
 from transformers import get_cosine_schedule_with_warmup, get_linear_schedule_with_warmup
 import argparse
 import os
@@ -23,19 +23,19 @@ config = {'bert-base-uncased': 768, 'bert-large-uncased': 1024,
 data_list = {'bert': BERTLoader, 'electra': BERTLoader, 'roberta': RoBERTaLoader,
              'albert': AlbertLoader, 'embedding': BERTLoader}
 
-head_list = {'linear': LinearHead, 'cnn': CNNHead, 'transformer': TransformerHead, 'lstm': LSTMHead, 'gru': GRUHead}
+head_list = {'linear': LinearHead, 'cnn': CNNHead, 'transformer': TransformerHead, 'lstm': LSTMHead, 'gru': GRUHead, 'mix': MixHead}
 schedule_list = {'linear_warmup': get_linear_schedule_with_warmup, 'cosine_warmup': get_cosine_schedule_with_warmup}
 
 parser = argparse.ArgumentParser()
 
 parser.add_argument("--seed", default=1024, type=int)
-parser.add_argument("--data", default='train', type=str, choices=['train', 'extended'])
+parser.add_argument("--data", default='train', type=str, choices=['train', 'extended', 'train8', 'extended8'])
 parser.add_argument("--model", default='roberta', type=str, choices=list(model_list.keys()))
 parser.add_argument("--pretrained", default='roberta', type=str, choices=list(config.keys()))
 parser.add_argument("--head", default='linear', type=str, choices=list(head_list.keys()))
 parser.add_argument("--layer_used", default=2, type=int)
 parser.add_argument("--num_layers", default=2, type=int)
-parser.add_argument("--loss", default='ce', type=str)
+parser.add_argument("--loss", default='ce=1.,jcd=0.', type=str)
 parser.add_argument("--lr", default=3e-5, type=float)
 parser.add_argument("--schedule", default='linear_warmup', type=str, choices=['linear_warmup', 'cosine_warmup'])
 parser.add_argument("--batch_size", default=20, type=int)
@@ -69,7 +69,7 @@ head = head_list[HEAD](d_model, layers_used, num_layers=num_layers)
 
 #  4
 LOSS = args.loss
-loss_fn = get_loss_fn(ce=1., jcd=0.)
+loss_fn = get_loss_fn(**decode_exp(LOSS))
 
 #  5
 SCHEDULE = args.schedule
