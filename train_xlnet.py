@@ -17,10 +17,10 @@ from tqdm.autonotebook import tqdm
 import utils
 
 ROBERTA_PATH = "roberta"
-TOKENIZER = XLNetTokenizer.from_pretrained('xlnet-large-cased')
+TOKENIZER = XLNetTokenizer.from_pretrained('xlnet-base-cased')
 TRAINING_FILE = "data/train_folds.csv"
 MAX_LEN = 192
-TRAIN_BATCH_SIZE = 5
+TRAIN_BATCH_SIZE = 1
 accumulation_steps = 10
 VALID_BATCH_SIZE = 7
 EPOCHS = 3
@@ -50,7 +50,6 @@ def get_offsets(s, pattern, ignore=0):
     base = 0
     offset = []
     s = s.lower().replace('â', 'a')
-    # print(s)
     for i, p in enumerate(pattern):
         if i < ignore:
             offset.append((0, 0))
@@ -180,14 +179,14 @@ class TweetModel(transformers.BertPreTrainedModel):
     def __init__(self, conf):
         super(TweetModel, self).__init__(PretrainedConfig())
         # Load the pretrained BERT model
-        self.bert = XLNetModel.from_pretrained('xlnet-large-cased', output_hidden_states=True, output_attentions=True)
+        self.bert = XLNetModel.from_pretrained('xlnet-base-cased', output_hidden_states=True, output_attentions=True)
         # self.roberta = transformers.RobertaModel.from_pretrained(ROBERTA_PATH, config=conf)
         # Set 10% dropout to be applied to the BERT backbone's output
         self.drop_out = nn.Dropout(0.1)
         # 768 is the dimensionality of bert-base-uncased's hidden representations
         # Multiplied by 2 since the forward pass concatenates the last two hidden representation layers
         # The output will have two dimensions ("start_logits", and "end_logits")
-        self.l0 = nn.Linear(192 * 2, 2)
+        self.l0 = nn.Linear(1024 * 2, 2)
         torch.nn.init.normal_(self.l0.weight, std=0.02)
     
     def forward(self, ids, mask, token_type_ids):
@@ -197,7 +196,7 @@ class TweetModel(transformers.BertPreTrainedModel):
             ids,
             attention_mask=mask,
         )  # bert_layers x bs x SL x (768 * 2)
-        out = out[2]
+        out = out[1]
         
         # Concatenate the last two hidden states
         # This is done since experiments have shown that just getting the last layer

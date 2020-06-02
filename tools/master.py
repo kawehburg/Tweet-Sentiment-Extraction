@@ -14,8 +14,8 @@ from torch.nn.init import xavier_uniform_
 from torch.nn.modules.normalization import LayerNorm
 from transformers import AdamW
 from transformers import get_linear_schedule_with_warmup
-from transformers import ElectraModel, BertModel, AlbertModel
-from transformers import BertTokenizer, AlbertTokenizer
+from transformers import ElectraModel, BertModel, AlbertModel, XLNetModel
+from transformers import BertTokenizer, AlbertTokenizer, XLNetTokenizer
 from tqdm.autonotebook import tqdm
 import copy
 import math
@@ -127,6 +127,22 @@ class Albert(nn.Module):
             attention_mask=mask,
         )  # bert_layers x bs x SL x (768 * 2)
         out = out[2]
+        return out
+
+
+class XLNet(nn.Module):
+    def __init__(self, name='xlnet-large-cased', pad=0, **kwargs):
+        super().__init__()
+        self.bert = XLNetModel.from_pretrained(name, output_hidden_states=True, output_attentions=True)
+        self.pad = pad
+    
+    def forward(self, ids, mask, token_type_ids):
+        mask = ids.ne(self.pad).float().detach()
+        out = self.bert(
+            ids,
+            attention_mask=mask,
+        )  # bert_layers x bs x SL x (768 * 2)
+        out = out[1]
         return out
 
 
@@ -415,9 +431,8 @@ class AlbertLoader:
     def process_data(tweet, selected_text, sentiment, tokenizer, max_len):
         # handle special example
         tweet = tweet.replace('ï¿½', 'i').replace('ï', 'i').replace('``', '"').replace('\'', '"').replace('`', '\'')
-        selected_text = selected_text.replace('ï¿½', 'i').replace('ï', 'i').replace('``', '"').replace('\'',
-                                                                                                       '"').replace(
-            '`', '\'')
+        selected_text = selected_text.replace('ï¿½', 'i').replace('ï', 'i').replace('``', '"').replace('\'', '"') \
+            .replace('`', '"')
         
         tweet = " " + " ".join(str(tweet).split())
         selected_text = " " + " ".join(str(selected_text).split())
@@ -481,6 +496,141 @@ class AlbertLoader:
         self.sentiment = sentiment
         self.selected_text = selected_text
         self.tokenizer = AlbertTokenizer.from_pretrained(name)
+        self.max_len = max_len
+        self.tweet_id = tweet_id
+    
+    def __len__(self):
+        return len(self.tweet)
+    
+    def __getitem__(self, item):
+        data = self.process_data(
+            self.tweet[item],
+            self.selected_text[item],
+            self.sentiment[item],
+            self.tokenizer,
+            self.max_len
+        )
+        
+        # Return the processed data where the lists are converted to `torch.tensor`s
+        return {
+            'tweet_id': self.tweet_id[item],
+            'ids': torch.tensor(data["ids"], dtype=torch.long),
+            'mask': torch.tensor(data["mask"], dtype=torch.long),
+            'token_type_ids': torch.tensor(data["token_type_ids"], dtype=torch.long),
+            'targets_start': torch.tensor(data["targets_start"], dtype=torch.long),
+            'targets_end': torch.tensor(data["targets_end"], dtype=torch.long),
+            'orig_tweet': data["orig_tweet"],
+            'orig_selected': data["orig_selected"],
+            'sentiment': data["sentiment"],
+            'offsets': torch.tensor(data["offsets"], dtype=torch.long)
+        }
+
+
+class XLNetLoader:
+    @staticmethod
+    def get_offsets(s, pattern, ignore=0):
+        base = 0
+        offset = []
+        s = s.lower().replace('â', 'a')
+        for idx, p in enumerate(pattern):
+            if idx < ignore:
+                offset.append((0, 0))
+                continue
+            start_idx, end_idx = AlbertLoader.find_index(s[base:], pattern, idx)
+            offset.append((base + start_idx, base + end_idx))
+            base += end_idx
+        return offset
+    
+    @staticmethod
+    def find_index(s, pattern, idx, roll=False):
+        pattern[idx] = pattern[idx].lower().replace('▁', '')
+        if pattern[idx] == '<unk>' and idx + 1 < len(pattern):
+            start, end = AlbertLoader.find_index(s, pattern, idx + 1, roll=True)
+            return 0, start
+        elif pattern[idx] == '<unk>':
+            return 0, len(s)
+        try:
+            start = s.index(pattern[idx])
+            end = start + len(pattern[idx])
+        except ValueError:
+            start = 0
+            end = 0
+        return start, end
+    
+    @staticmethod
+    def process_data(tweet, selected_text, sentiment, tokenizer, max_len):
+        # handle special example
+        tweet = tweet.replace('ï¿½', '').replace('¿½t', '').replace('ï', '').replace('``', '"') \
+            .replace('^', '#').replace("''", '"')
+        selected_text = selected_text.replace('ï¿½', '').replace('¿½t', '').replace('ï', '').replace('``', '"') \
+            .replace('^', '#').replace("''", '"')
+        
+        raw_tweet = " " + " ".join(str(tweet).split())
+        raw_selected_text = " " + " ".join(str(selected_text).split())
+        
+        tweet = raw_tweet.replace('-', '#')
+        selected_text = raw_selected_text.replace('-', '#')
+        
+        question, text = sentiment, tweet
+        encoding = tokenizer.encode_plus(question, text)
+        input_ids, token_type_ids = encoding["input_ids"], encoding["token_type_ids"]
+        mask = [1] * len(token_type_ids)
+        tweet_offsets = AlbertLoader.get_offsets(tweet, tokenizer.convert_ids_to_tokens(input_ids)[1:-1], ignore=1)
+        tweet_offsets = [(0, 0)] + tweet_offsets + [(0, 0)]
+        
+        len_st = len(selected_text) - 1
+        idx0 = None
+        idx1 = None
+        
+        for ind in (i for i, e in enumerate(tweet) if e == selected_text[1]):
+            if " " + tweet[ind: ind + len_st] == selected_text:
+                idx0 = ind
+                idx1 = ind + len_st - 1
+                break
+        
+        char_targets = [0] * len(tweet)
+        if idx0 != None and idx1 != None:
+            for ct in range(idx0, idx1 + 1):
+                char_targets[ct] = 1
+        
+        target_idx = []
+        for j, (offset1, offset2) in enumerate(tweet_offsets):
+            if sum(char_targets[offset1: offset2]) > 0:
+                target_idx.append(j)
+        
+        try:
+            targets_start = target_idx[0]
+            targets_end = target_idx[-1]
+        except:
+            targets_start = 2
+            targets_end = len(input_ids) - 2
+            print('>>', tweet)
+            print('>>', selected_text)
+        
+        padding_length = max_len - len(input_ids)
+        if padding_length > 0:
+            input_ids = input_ids + ([0] * padding_length)
+            mask = mask + ([0] * padding_length)
+            token_type_ids = token_type_ids + ([0] * padding_length)
+            tweet_offsets = tweet_offsets + ([(0, 0)] * padding_length)
+        
+        return {
+            'ids': input_ids,
+            'mask': mask,
+            'token_type_ids': token_type_ids,
+            'targets_start': targets_start,
+            'targets_end': targets_end,
+            'orig_tweet': raw_tweet,
+            'orig_selected': raw_selected_text,
+            'sentiment': sentiment,
+            'offsets': tweet_offsets,
+        }
+    
+    def __init__(self, tweet, sentiment, selected_text, tweet_id=None, name='albert-xxlarge-v2', max_len=192):
+        self.tweet = tweet
+        self.sentiment = sentiment
+        self.selected_text = selected_text
+        self.tokenizer = XLNetTokenizer.from_pretrained(name)
         self.max_len = max_len
         self.tweet_id = tweet_id
     

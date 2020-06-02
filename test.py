@@ -1,4 +1,4 @@
-from transformers import BertTokenizer, XLNetTokenizer, AlbertTokenizer, AlbertForQuestionAnswering, ElectraModel
+from transformers import BertTokenizer, XLNetTokenizer, AlbertTokenizer, AlbertForQuestionAnswering, ElectraModel, XLNetTokenizer
 
 
 def xavier(model, escapes=None, escapekey=None):
@@ -53,43 +53,45 @@ def rebuild(raw, offset):
 
 
 data = []
-with open('data/test.csv', 'r', encoding='utf-8') as f:
+with open('data/train.csv', 'r', encoding='utf-8') as f:
     for line in f:
         data.append(line.split(',')[2])
 
-tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+tokenizer = XLNetTokenizer.from_pretrained('xlnet-large-cased')
 print(len(tokenizer))
-model = ElectraModel.from_pretrained('google/electra-large-discriminator', output_hidden_states=True, output_attentions=True)
+# model = ElectraModel.from_pretrained('google/electra-large-discriminator', output_hidden_states=True, output_attentions=True)
 # model = AlbertForQuestionAnswering.from_pretrained('albert-large-v2')
 # xavier(model)
 # input()
-# raw_text = 'BABEE. ) LOVE YOOOOUUU. > RP time."'
-# # raw_text = line
-# raw_text = raw_text.replace('ï¿½', '').replace('ï', 'i').replace('``', '"').replace('\'', '"').replace('`', '\'')
-# raw_text = ' '.join(raw_text.split())
-# encode = tokenizer.encode(raw_text.lower())
-# encode = [x for x in encode if x != 13]
-# print(encode)
-# tokens = tokenizer.convert_ids_to_tokens(encode)[1:-1]
-# print(tokens)
-# aa = get_offsets(raw_text, tokens)
-# print(aa)
-# print(rebuild(raw_text, aa))
-# print(raw_text)
-# input()
+raw_text = ": ''UB40m'Br-ing Me - Yo-- ur Cup''' ? http://blip.fm/~7af72"
+# raw_text = line
+raw_text = raw_text.replace('ï¿½', '').replace('ï', 'i').replace('``', '"').replace('^', '#').replace("''", '"')
+raw = ' '.join(raw_text.split())
+raw_text = raw.replace('-', '#')
+encode = tokenizer.encode_plus('positive', raw_text.lower())['input_ids']
+encode = [x for x in encode]
+print(encode)
+tokens = tokenizer.convert_ids_to_tokens(encode)
+print(tokens)
+aa = get_offsets(raw_text, tokens)
+print(aa)
+print(rebuild(raw, aa))
+print(raw)
+input()
 for line in data:
     # raw_text = 'my guys call me ``BartÂ ofÂ theÂ criticalÂ questions``. I`m guessing that`s a good thing.  #zeropoint.IT'
     raw_text = line
-    raw_text = raw_text.replace('ï¿½', '').replace('ï', 'i').replace('``', '"').replace('\'', '"').replace('`', '\'')
-    raw_text = ' '.join(raw_text.split())
+    raw_text = raw_text.replace('ï¿½', '').replace('ï', 'i').replace('``', '"').replace('^', '#').replace("''", '"')
+    raw = ' '.join(raw_text.split())
+    raw_text = raw.replace('-', '#')
     encode = tokenizer.encode(raw_text)
     encode = [x for x in encode if x != 13]
-    tokens = tokenizer.convert_ids_to_tokens(encode)[1:-1]
+    tokens = tokenizer.convert_ids_to_tokens(encode)
     # print(tokens)
     aa = get_offsets(raw_text, tokens)
     # print(aa)
-    if rebuild(raw_text, aa).strip() != raw_text.strip():
-        print(raw_text)
+    if rebuild(raw, aa).strip() != raw.strip():
+        print(raw)
     # print(rebuild(raw_text, aa))
 # #
 # from transformers import BertTokenizer, BertForQuestionAnswering, ElectraModel
