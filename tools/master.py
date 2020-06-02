@@ -906,7 +906,7 @@ def build_data(path, builder, train_batch_size, val_batch_size, name):
     df_test = pd.read_csv("data/test.csv")
     df_test.loc[:, "selected_text"] = df_test.text.values
     test_dataset = builder(df_test.text.values, df_test.sentiment.values, df_test.selected_text.values,
-                           max_len=192, name=name)
+                           tweet_id=df_test.textID.values, max_len=192, name=name)
     
     # Instantiate DataLoader with `test_dataset`
     data_loader = torch.utils.data.DataLoader(
