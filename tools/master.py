@@ -1121,7 +1121,7 @@ def test(model, data_loader, SAVE_HEAD, MODE):
     sample.head()
 
 
-def get_loss_fn(ce=1., jcd=0.):
+def get_loss_fn(ce=1., jcd=0., **kwargs):
     def f(start_logits, end_logits, start_positions, end_positions, mask=None):
         c_loss = ce_loss(start_logits, end_logits, start_positions, end_positions)
         if jcd == 0:
