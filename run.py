@@ -1,4 +1,5 @@
 from tools.master import run, test, seed_everything, get_loss_fn, build_data, Model, collect
+from tools.master import test_folds, train_folds
 from tools.master import BERTModel, ELECTRAModel, RoBERTaModel, Albert, Embedding, XLNet
 from tools.master import BERTLoader, RoBERTaLoader, AlbertLoader, XLNetLoader
 from tools.master import LinearHead, CNNHead, TransformerHead, LSTMHead, GRUHead, MixHead, SpanHead, SpanCNNHead, SpanMixHead
@@ -53,13 +54,13 @@ data_name = 'train'
 DATA = f'data/{data_name}_folds.csv'
 
 #  2
-MODEL = 'bert'
-name = 'bert-base-uncased'
+MODEL = 'xlnet'
+name = 'xlnet-base-cased'
 base_model = model_list[MODEL](name=name)
 data = data_list[MODEL]
 
 #  3
-HEAD = 'span_mix'
+HEAD = 'span_cnn'
 d_model = config[name]
 layers_used = 2
 head = head_list[HEAD](d_model, layers_used, num_layers=2)
@@ -73,8 +74,8 @@ SCHEDULE = 'cosine_warmup'
 schedule = schedule_list[SCHEDULE]
 
 #######
-train_batch_size = 20
-epochs = 3
+train_batch_size = 18
+epochs = 4
 lr = 4e-5
 
 save_path = f'saved/{data_name}_{MODEL}_{d_model}_{HEAD}_'
@@ -82,16 +83,26 @@ result_path = f'results/{data_name}_{MODEL}_{d_model}_{HEAD}_'
 print(save_path)
 model = Model(base_model, head)
 print('param num =', collect(model))
-
-run(0, DATA, data, model, train_batch_size, epochs, loss_fn, save_path, lr=lr, scheduler_fn=schedule, name=name)
-run(1, DATA, data, model, train_batch_size, epochs, loss_fn, save_path, lr=lr, scheduler_fn=schedule, name=name)
-run(2, DATA, data, model, train_batch_size, epochs, loss_fn, save_path, lr=lr, scheduler_fn=schedule, name=name)
-run(3, DATA, data, model, train_batch_size, epochs, loss_fn, save_path, lr=lr, scheduler_fn=schedule, name=name)
-run(4, DATA, data, model, train_batch_size, epochs, loss_fn, save_path, lr=lr, scheduler_fn=schedule, name=name)
+FOLDS = 5
+if args.train:
+    train_folds(FOLDS, DATA, data, model, train_batch_size, epochs, loss_fn, save_path, lr=lr, scheduler_fn=schedule,
+                name=name)
 
 ########
-val_batch_size = train_batch_size
-test_data = build_data("data/test.csv", data, train_batch_size, val_batch_size, name)
+test_data = build_data("data/test.csv", data, train_batch_size, train_batch_size, name)
 test(model, test_data, save_path, result_path)
+test_folds(FOLDS, model, test_data, save_path, result_path)
+########
+
+# run(0, DATA, data, model, train_batch_size, epochs, loss_fn, save_path, lr=lr, scheduler_fn=schedule, name=name)
+# run(1, DATA, data, model, train_batch_size, epochs, loss_fn, save_path, lr=lr, scheduler_fn=schedule, name=name)
+# run(2, DATA, data, model, train_batch_size, epochs, loss_fn, save_path, lr=lr, scheduler_fn=schedule, name=name)
+# run(3, DATA, data, model, train_batch_size, epochs, loss_fn, save_path, lr=lr, scheduler_fn=schedule, name=name)
+# run(4, DATA, data, model, train_batch_size, epochs, loss_fn, save_path, lr=lr, scheduler_fn=schedule, name=name)
+#
+# ########
+# val_batch_size = train_batch_size
+# test_data = build_data("data/test.csv", data, train_batch_size, val_batch_size, name)
+# test(model, test_data, save_path, result_path)
 
 ########

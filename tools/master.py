@@ -977,7 +977,7 @@ class SpanMixHead(nn.Module):
             nn.LeakyReLU()
         )
         
-        self.l0 = nn.Linear(d_model * 4 + d_model * 2 * num_layers, 2)
+        self.l0 = nn.Linear(d_model * 4 + d_model * 2 * layers_used, 2)
         for param in self.lstm.parameters():
             if param.data.dim() > 1:
                 xavier_uniform_(param.data)
