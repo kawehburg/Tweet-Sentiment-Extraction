@@ -868,7 +868,6 @@ class MixHead(nn.Module):
         out2 = self.lstm(out2.transpose(0, 1))[0].transpose(0, 1)
         
         out3 = out.permute(0, 2, 1)
-        tar_sz = out3.size()
         out3 = self.cnn(out3)
         out3 = out3.permute(0, 2, 1)
         
