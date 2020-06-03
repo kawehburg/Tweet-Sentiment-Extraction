@@ -12,11 +12,13 @@ import transformers
 import tokenizers
 from torch.nn.init import xavier_uniform_
 from torch.nn.modules.normalization import LayerNorm
+from torch.autograd import Variable
 from transformers import AdamW
 from transformers import get_linear_schedule_with_warmup
 from transformers import ElectraModel, BertModel, AlbertModel, XLNetModel
 from transformers import BertTokenizer, AlbertTokenizer, XLNetTokenizer
 from tqdm.autonotebook import tqdm
+from .lovas import lovasz_hinge_flat
 import copy
 import math
 import utils
@@ -666,7 +668,7 @@ class LinearHead(nn.Module):
         super().__init__()
         self.d_model = d_model
         self.layers_used = layers_used
-        self.drop_out = nn.Dropout(0.1)
+        self.drop_out = nn.Dropout(0.15)
         self.l0 = nn.Linear(d_model * layers_used, 2)
         torch.nn.init.normal_(self.l0.weight, std=0.02)
     
@@ -681,17 +683,32 @@ class LinearHead(nn.Module):
         return {'start_logits': start_logits, 'end_logits': end_logits}
 
 
-class CNNHead(nn.Module):
-    def __init__(self, d_model, layers_used, num_layers=2):
+class CNN(nn.Module):
+    def __init__(self, d_model, layers_used, num_layers=2, div=2):
         super().__init__()
         self.d_model = d_model
         self.layers_used = layers_used
-        self.drop_out = nn.Dropout(0.1)
-        self.cnn = nn.Sequential(
-            nn.Conv1d(d_model * layers_used, d_model * layers_used, 3, padding=1),
-            nn.LeakyReLU()
-        )
-        self.l0 = nn.Linear(d_model * layers_used, 2)
+        self.drop_out = nn.Dropout(0.15)
+        self.cnn = nn.ModuleList([nn.Conv1d(d_model * layers_used // max(div * l, 1),
+                                            d_model * layers_used // (div * (l + 1)), 5, padding=2)
+                                  for l in range(num_layers)])
+    
+    def forward(self, out, mask=None):
+        for cnn in self.cnn:
+            out = cnn(out)
+            out = F.leaky_relu(out)
+        
+        return out
+
+
+class CNNHead(nn.Module):
+    def __init__(self, d_model, layers_used, num_layers=2, div=2):
+        super().__init__()
+        self.d_model = d_model
+        self.layers_used = layers_used
+        self.drop_out = nn.Dropout(0.15)
+        self.cnn = CNN(d_model, layers_used=layers_used, num_layers=num_layers, div=div)
+        self.l0 = nn.Linear(d_model * layers_used // (div * num_layers), 2)
         for param in self.cnn.parameters():
             if param.data.dim() > 1:
                 xavier_uniform_(param.data)
@@ -703,7 +720,7 @@ class CNNHead(nn.Module):
         out = self.drop_out(out)  # bs x SL x (768 * 2)
         out = out.permute(0, 2, 1)
         tar_sz = out.size()
-        out = self.cnn(out).view(tar_sz)
+        out = self.cnn(out)
         out = out.permute(0, 2, 1)
         logits = self.l0(out)
         start_logits, end_logits = logits.split(1, dim=-1)
@@ -806,11 +823,11 @@ class TransformerHead(nn.Module):
 
 
 class MixHead(nn.Module):
-    def __init__(self, d_model, layers_used, num_layers=2):
+    def __init__(self, d_model, layers_used, num_layers=2, div=2):
         super().__init__()
         self.d_model = d_model
         self.layers_used = layers_used
-        self.drop_out = nn.Dropout(0.1)
+        self.drop_out = nn.Dropout(0.15)
         
         self.d0 = nn.Linear(d_model * layers_used, d_model)
         self.transformer = nn.TransformerEncoder(
@@ -821,12 +838,9 @@ class MixHead(nn.Module):
         self.d1 = nn.Linear(d_model * layers_used, d_model)
         self.lstm = nn.LSTM(d_model, d_model, num_layers=num_layers, bidirectional=True)
         
-        self.cnn = nn.Sequential(
-            nn.Conv1d(d_model * layers_used, d_model * layers_used, 3, padding=1),
-            nn.LeakyReLU()
-        )
+        self.cnn = CNN(d_model, layers_used=layers_used, num_layers=num_layers, div=div)
         
-        self.l0 = nn.Linear(d_model * 3 + d_model * 2 * num_layers, 2)
+        self.l0 = nn.Linear(d_model * 3 + d_model * layers_used // (div * num_layers) + d_model * num_layers, 2)
         
         for param in self.transformer.parameters():
             if param.data.dim() > 1:
@@ -855,7 +869,7 @@ class MixHead(nn.Module):
         
         out3 = out.permute(0, 2, 1)
         tar_sz = out3.size()
-        out3 = self.cnn(out3).view(tar_sz)
+        out3 = self.cnn(out3)
         out3 = out3.permute(0, 2, 1)
         
         out4 = out
@@ -876,7 +890,7 @@ class SpanHead(nn.Module):
         super().__init__()
         self.d_model = d_model
         self.layers_used = layers_used
-        self.drop_out = nn.Dropout(0.1)
+        self.drop_out = nn.Dropout(0.15)
         self.l0 = nn.Linear(d_model * layers_used, 2)
         self.l1 = nn.Linear(d_model * layers_used, 1)
         torch.nn.init.normal_(self.l0.weight, std=0.02)
@@ -888,7 +902,6 @@ class SpanHead(nn.Module):
         out = self.drop_out(out)
         
         span = self.l1(out)
-        span = torch.sigmoid(span)
         
         logits = self.l0(out)
         start_logits, end_logits = logits.split(1, dim=-1)
@@ -899,26 +912,17 @@ class SpanHead(nn.Module):
 
 
 class SpanCNNHead(nn.Module):
-    def __init__(self, d_model, layers_used, num_layers=2):
+    def __init__(self, d_model, layers_used, num_layers=2, div=2):
         super().__init__()
         self.d_model = d_model
         self.layers_used = layers_used
-        self.drop_out = nn.Dropout(0.1)
-        self.cnn = nn.Sequential(
-            nn.Conv1d(d_model * layers_used, d_model * layers_used, 3, padding=1),
-            nn.LeakyReLU()
-        )
-        self.l0 = nn.Linear(d_model * layers_used + 2, 2)
-        self.cnn1 = nn.Sequential(
-            nn.Conv1d(d_model * layers_used, d_model * layers_used, 3, padding=1),
-            nn.LeakyReLU()
-        )
-        self.l1 = nn.Linear(d_model * layers_used, 1)
+        self.drop_out = nn.Dropout(0.15)
+        self.cnn = CNN(d_model, layers_used=layers_used, num_layers=num_layers, div=div)
+        self.l0 = nn.Linear(d_model * layers_used // (div * num_layers) + 2, 2)
+        self.cnn1 = CNN(d_model, layers_used=layers_used, num_layers=num_layers, div=div)
+        self.l1 = nn.Linear(d_model * layers_used // (div * num_layers), 1)
         
-        self.cnn2 = nn.Sequential(
-            nn.Conv1d(1, 2, 3, padding=1),
-            nn.LeakyReLU()
-        )
+        self.cnn2 = nn.Conv1d(1, 2, 5, padding=2)
         
         for param in self.cnn.parameters():
             if param.data.dim() > 1:
@@ -939,14 +943,13 @@ class SpanCNNHead(nn.Module):
         out = out.permute(0, 2, 1)
         tar_sz = out.size()
         
-        out1 = self.cnn1(out).view(tar_sz)
+        out1 = self.cnn1(out)
         out1 = out1.permute(0, 2, 1)
         span = self.l1(out1)
-        span = torch.sigmoid(span)
         
-        span_used = self.cnn2(span.permute(0, 2, 1)).view(tar_sz[0], 2, tar_sz[2]).permute(0, 2, 1)
+        span_used = self.cnn2(torch.sigmoid(span).permute(0, 2, 1)).view(tar_sz[0], 2, tar_sz[2]).permute(0, 2, 1)
         
-        out0 = self.cnn(out).view(tar_sz)
+        out0 = self.cnn(out)
         out0 = out0.permute(0, 2, 1)
         out0 = self.drop_out(out0)
         
@@ -961,23 +964,20 @@ class SpanCNNHead(nn.Module):
 
 
 class SpanMixHead(nn.Module):
-    def __init__(self, d_model, layers_used, num_layers=2):
+    def __init__(self, d_model, layers_used, num_layers=2, div=2):
         super().__init__()
         self.d_model = d_model
         self.layers_used = layers_used
-        self.drop_out = nn.Dropout(0.1)
+        self.drop_out = nn.Dropout(0.15)
         
         self.d0 = nn.Linear(d_model * layers_used, 1)
         
         self.d1 = nn.Linear(d_model * layers_used, d_model)
         self.lstm = nn.LSTM(d_model, d_model, num_layers=num_layers, bidirectional=True)
         self.gru = nn.GRU(d_model, d_model, num_layers=num_layers, bidirectional=True)
-        self.cnn = nn.Sequential(
-            nn.Conv1d(d_model * layers_used, d_model * layers_used, 3, padding=1),
-            nn.LeakyReLU()
-        )
+        self.cnn = CNN(d_model, layers_used=layers_used, num_layers=num_layers, div=div)
         
-        self.l0 = nn.Linear(d_model * 4 + d_model * 2 * layers_used, 2)
+        self.l0 = nn.Linear(d_model * 4 + d_model * layers_used // (div * num_layers) + d_model * layers_used, 2)
         for param in self.lstm.parameters():
             if param.data.dim() > 1:
                 xavier_uniform_(param.data)
@@ -998,7 +998,6 @@ class SpanMixHead(nn.Module):
         out = self.drop_out(out)
         
         span = self.d0(out)
-        span = torch.sigmoid(span)
         
         out2 = self.d1(out)
         out1 = self.gru(out2.transpose(0, 1))[0].transpose(0, 1)
@@ -1006,7 +1005,7 @@ class SpanMixHead(nn.Module):
         
         out3 = out.permute(0, 2, 1)
         tar_sz = out3.size()
-        out3 = self.cnn(out3).view(tar_sz)
+        out3 = self.cnn(out3)
         out3 = out3.permute(0, 2, 1)
         
         out4 = out
@@ -1020,6 +1019,7 @@ class SpanMixHead(nn.Module):
         start_logits = start_logits.squeeze(-1)
         end_logits = end_logits.squeeze(-1)
         return {'start_logits': start_logits, 'end_logits': end_logits, 'span': span}
+
 
 def train_fn(data_loader, model, optimizer, device, loss_fn=None, scheduler=None):
     model.train()
@@ -1125,6 +1125,23 @@ def calculate_jaccard_score(
         filtered_output = original_tweet
     
     jac = utils.jaccard(target_string.strip(), filtered_output.strip())
+    
+    # filtered_output = filtered_output.strip()
+    # # 1
+    # filtered_output = filtered_output
+    #
+    # # 2
+    # if filtered_output[0] == '"':
+    #     filtered_output = filtered_output[1:]
+    # if filtered_output[-1] == '"':
+    #     filtered_output = filtered_output[:-1]
+    #
+    # # 3
+    # if filtered_output[0] != '"':
+    #     filtered_output = '"' + filtered_output
+    # if filtered_output[-1] != '"':
+    #     filtered_output = filtered_output + '"'
+    
     return jac, filtered_output
 
 
@@ -1297,7 +1314,8 @@ def run(fold, path, data, model, batch_size, epochs, loss_fn, save_path, lr=3e-5
 def train_folds(folds, path, data, model, batch_size, epochs, loss_fn, save_path, lr=3e-5, scheduler_fn=None,
                 name='roberta', pretrained=False):
     for fold in range(folds):
-        run(fold, path, data, model, batch_size, epochs, loss_fn, save_path, lr=lr, scheduler_fn=scheduler_fn, name=name,
+        run(fold, path, data, model, batch_size, epochs, loss_fn, save_path, lr=lr, scheduler_fn=scheduler_fn,
+            name=name,
             pretrained=pretrained)
 
 
@@ -1432,7 +1450,8 @@ def test(model, data_loader, SAVE_HEAD, MODE):
     # Note: This trick comes from: https://www.kaggle.com/c/tweet-sentiment-extraction/discussion/140942
     # When the LB resets, this trick won't help
     def post_process(selected):
-        return " ".join(set(selected.lower().split()))
+        return selected
+        # return " ".join(set(selected.lower().split()))
     
     sample = pd.read_csv("data/sample_submission.csv")
     sample.loc[:, 'selected_text'] = final_output
@@ -1530,14 +1549,19 @@ def test_folds(folds, model, data_loader, SAVE_HEAD, MODE):
     sample.head()
 
 
-def get_loss_fn(ce=1., jcd=0., span=0., **kwargs):
+def get_loss_fn(ce=1., dst=0., span=0., jcd=0., lvs=0., jel=0., ksl=0., **kwargs):
     def f(start_logits, end_logits, start_positions, end_positions, mask=None, output=None):
         c_loss = ce_loss(start_logits, end_logits, start_positions, end_positions)
         loss = ce * c_loss
-        if jcd != 0:
-            loss = loss + jcd * distance_loss(start_logits, end_logits, start_positions, end_positions, mask=mask)
+        if dst != 0:
+            loss = loss + dst * distance_loss(start_logits, end_logits, start_positions, end_positions, mask=mask)
         if span != 0:
-            loss = loss + span * span_loss(start_positions, end_positions, mask, output)
+            loss = loss + span * span_loss(start_positions, end_positions, mask, output, jcd, lvs)
+        if jel != 0:
+            loss = loss + jel * jel_loss(start_logits, end_logits, start_positions, end_positions)
+        if ksl != 0:
+            loss = loss + ksl * (KSLoss(start_logits, start_positions) + KSLoss(end_logits, end_positions)) / 2
+
         return loss
     
     return f
@@ -1593,15 +1617,57 @@ def distance_loss(start_logits, end_logits, start_positions, end_positions, mask
     return total_loss
 
 
-def span_loss(start_positions, end_positions, mask, output):
+def span_loss(start_positions, end_positions, mask, output, jcd=0., lvs=0.):
     span = output['span']
     bc_size = span.size(0)
     target = torch.zeros_like(span)
     for b in range(bc_size):
         target[b][start_positions[b]:end_positions[b]] = 1.
     target = target.to(span.device)
-    loss = F.binary_cross_entropy(span, target)
+    loss = (1 - jcd - lvs) * F.binary_cross_entropy(torch.sigmoid(span), target)
+    if jcd != 0:
+        loss = loss + jcd * jaccard_loss(torch.sigmoid(span), target).mean()
+    if lvs != 0:
+        loss = loss + lvs * lovasz_hinge_flat(span.view(-1), target.view(-1)).mean()
+    
     return loss
+
+
+def jaccard_loss(pred, target, smooth=1e-10):
+    I = (pred * target).sum(axis=1, keepdim=True)
+    P = pred.sum(axis=1, keepdim=True)
+    T = target.sum(axis=1, keepdim=True)
+    loss = 1 - ((I + smooth) / (P + T - I + smooth))
+    return loss
+
+
+def jel_loss(start_logits, end_logits, start_positions, end_positions):
+    # from https://www.kaggle.com/koza4ukdmitrij/jaccard-expectation-loss/comments
+    indexes = torch.arange(start_logits.size()[1]).unsqueeze(0).cuda()
+
+    start_pred = torch.sum(F.softmax(start_logits) * indexes, dim=1)
+    end_pred = torch.sum(F.softmax(end_logits) * indexes, dim=1)
+
+    len_true = end_positions - start_positions + 1
+    intersection = len_true - F.relu(start_pred - start_positions) - F.relu(end_positions - end_pred)
+    union = len_true + F.relu(start_positions - start_pred) + F.relu(end_pred - end_positions)
+
+    jel = 1 - intersection / union
+    jel = torch.mean(jel)
+    return jel
+
+
+def KSLoss(preds, label):
+    bc_size = preds.size(0)
+    target = torch.zeros_like(preds)
+    for b in range(bc_size):
+        target[b][label[b]] = 1.
+    target = target.to(preds.device)
+    
+    pred_cdf = torch.cumsum(torch.softmax(preds, dim=1), dim=1)
+    target_cdf = torch.cumsum(target, dim=1)
+    error = (target_cdf - pred_cdf)**2
+    return torch.mean(error)
 
 
 def collect(model):
