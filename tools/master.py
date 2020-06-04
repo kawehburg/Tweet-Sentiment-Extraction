@@ -708,7 +708,7 @@ class CNNHead(nn.Module):
         self.layers_used = layers_used
         self.drop_out = nn.Dropout(0.15)
         self.cnn = CNN(d_model, layers_used=layers_used, num_layers=num_layers, div=div)
-        self.l0 = nn.Linear(d_model * layers_used // (div * num_layers), 2)
+        self.l0 = nn.Linear(d_model * layers_used // (div ** num_layers), 2)
         for param in self.cnn.parameters():
             if param.data.dim() > 1:
                 xavier_uniform_(param.data)
@@ -840,7 +840,7 @@ class MixHead(nn.Module):
         
         self.cnn = CNN(d_model, layers_used=layers_used, num_layers=num_layers, div=div)
         
-        self.l0 = nn.Linear(d_model * 3 + d_model * layers_used // (div * num_layers) + d_model * num_layers, 2)
+        self.l0 = nn.Linear(d_model * 3 + d_model * layers_used // (div ** num_layers) + d_model * num_layers, 2)
         
         for param in self.transformer.parameters():
             if param.data.dim() > 1:
@@ -917,9 +917,9 @@ class SpanCNNHead(nn.Module):
         self.layers_used = layers_used
         self.drop_out = nn.Dropout(0.15)
         self.cnn = CNN(d_model, layers_used=layers_used, num_layers=num_layers, div=div)
-        self.l0 = nn.Linear(d_model * layers_used // (div * num_layers) + 2, 2)
+        self.l0 = nn.Linear(d_model * layers_used // (div ** num_layers) + 2, 2)
         self.cnn1 = CNN(d_model, layers_used=layers_used, num_layers=num_layers, div=div)
-        self.l1 = nn.Linear(d_model * layers_used // (div * num_layers), 1)
+        self.l1 = nn.Linear(d_model * layers_used // (div ** num_layers), 1)
         
         self.cnn2 = nn.Conv1d(1, 2, 5, padding=2)
         
@@ -978,7 +978,7 @@ class SpanMixHead(nn.Module):
         self.cnn2 = CNN(d_model, layers_used=layers_used, num_layers=num_layers, div=div)
         self.cnn3 = nn.Conv1d(1, 2, 5, padding=2)
         
-        self.l0 = nn.Linear(d_model * 4 + d_model * layers_used // (div * num_layers) + d_model * layers_used + 2, 2)
+        self.l0 = nn.Linear(d_model * 4 + d_model * layers_used // (div ** num_layers) + d_model * layers_used + 2, 2)
         for param in self.lstm.parameters():
             if param.data.dim() > 1:
                 xavier_uniform_(param.data)
@@ -1326,7 +1326,7 @@ def run(fold, path, data, model, batch_size, epochs, loss_fn, save_path, lr=3e-5
 
 def train_folds(folds, path, data, model, batch_size, epochs, loss_fn, save_path, lr=3e-5, scheduler_fn=None,
                 name='roberta', pretrained=False):
-    for fold in range(folds):
+    for fold in folds:
         run(fold, path, data, model, batch_size, epochs, loss_fn, save_path, lr=lr, scheduler_fn=scheduler_fn,
             name=name,
             pretrained=pretrained)
@@ -1479,7 +1479,7 @@ def test_folds(folds, model, data_loader, SAVE_HEAD, MODE):
     
     # Load each of the five trained models and move to GPU
     ensemble = nn.ModuleList([])
-    for i in range(folds):
+    for i in range(folds[-1] + 1):
         _model = copy.deepcopy(model)
         _model.to(device)
         _model.load_state_dict(torch.load(SAVE_HEAD + str(i) + '.bin'))
@@ -1659,8 +1659,8 @@ def jel_loss(start_logits, end_logits, start_positions, end_positions):
     # from https://www.kaggle.com/koza4ukdmitrij/jaccard-expectation-loss/comments
     indexes = torch.arange(start_logits.size()[1]).unsqueeze(0).cuda()
 
-    start_pred = torch.sum(F.softmax(start_logits) * indexes, dim=1)
-    end_pred = torch.sum(F.softmax(end_logits) * indexes, dim=1)
+    start_pred = torch.sum(F.softmax(start_logits, dim=-1) * indexes, dim=1)
+    end_pred = torch.sum(F.softmax(end_logits, dim=-1) * indexes, dim=1)
 
     len_true = end_positions - start_positions + 1
     intersection = len_true - F.relu(start_pred - start_positions) - F.relu(end_positions - end_pred)
@@ -1680,7 +1680,7 @@ def KSLoss(preds, label):
     
     pred_cdf = torch.cumsum(torch.softmax(preds, dim=1), dim=1)
     target_cdf = torch.cumsum(target, dim=1)
-    error = (target_cdf - pred_cdf)**2
+    error = (target_cdf - pred_cdf) ** 2
     return torch.mean(error)
 
 

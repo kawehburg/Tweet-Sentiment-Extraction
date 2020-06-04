@@ -2,7 +2,8 @@ from tools.master import run, test, seed_everything, get_loss_fn, build_data, Mo
 from tools.master import test_folds, train_folds
 from tools.master import BERTModel, ELECTRAModel, RoBERTaModel, Albert, Embedding, XLNet
 from tools.master import BERTLoader, RoBERTaLoader, AlbertLoader, XLNetLoader
-from tools.master import LinearHead, CNNHead, TransformerHead, LSTMHead, GRUHead, MixHead, SpanHead, SpanCNNHead, SpanMixHead
+from tools.master import LinearHead, CNNHead, TransformerHead, LSTMHead, GRUHead, MixHead, SpanHead, SpanCNNHead, \
+    SpanMixHead
 from transformers import get_cosine_schedule_with_warmup, get_linear_schedule_with_warmup
 import argparse
 import os
@@ -30,7 +31,8 @@ head_list = {'linear': LinearHead, 'cnn': CNNHead, 'transformer': TransformerHea
              'mix': MixHead, 'span_linear': SpanHead, 'span_cnn': SpanCNNHead, 'span_mix': SpanMixHead}
 schedule_list = {'linear_warmup': get_linear_schedule_with_warmup, 'cosine_warmup': get_cosine_schedule_with_warmup}
 
-folds_list = {'train': 5, 'extended': 5, 'train8': 8, 'extended8': 8}
+folds_list = {'train': [i for i in range(5)], 'extended': [i for i in range(5)],
+              'train8': [i for i in range(8)], 'extended8': [i for i in range(8)]}
 parser = argparse.ArgumentParser()
 
 parser.add_argument("--seed", default=1024, type=int)
@@ -59,6 +61,7 @@ seed_everything(SEED)
 data_name = args.data
 DATA = f'data/{data_name}_folds.csv'
 FOLDS = folds_list[data_name]
+# FOLDS = [3, 4]
 #  2
 MODEL = args.model
 name = args.pretrained
