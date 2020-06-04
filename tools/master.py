@@ -1552,7 +1552,8 @@ def test_folds(folds, model, data_loader, SAVE_HEAD, MODE):
     # Note: This trick comes from: https://www.kaggle.com/c/tweet-sentiment-extraction/discussion/140942
     # When the LB resets, this trick won't help
     def post_process(selected):
-        return " ".join(set(selected.lower().split()))
+        # return " ".join(set(selected.lower().split()))
+        return selected
     
     sample = pd.read_csv("data/sample_submission.csv")
     sample.loc[:, 'selected_text'] = final_output
