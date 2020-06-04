@@ -689,8 +689,8 @@ class CNN(nn.Module):
         self.d_model = d_model
         self.layers_used = layers_used
         self.drop_out = nn.Dropout(0.15)
-        self.cnn = nn.ModuleList([nn.Conv1d(d_model * layers_used // max(div * l, 1),
-                                            d_model * layers_used // (div * (l + 1)), 5, padding=2)
+        self.cnn = nn.ModuleList([nn.Conv1d(d_model * layers_used // (div ** l),
+                                            d_model * layers_used // (div ** (l + 1)), 5, padding=2)
                                   for l in range(num_layers)])
     
     def forward(self, out, mask=None):
@@ -969,14 +969,16 @@ class SpanMixHead(nn.Module):
         self.layers_used = layers_used
         self.drop_out = nn.Dropout(0.15)
         
-        self.d0 = nn.Linear(d_model * layers_used, 1)
+        self.d0 = nn.Linear(d_model * layers_used // (div * num_layers), 1)
         
         self.d1 = nn.Linear(d_model * layers_used, d_model)
         self.lstm = nn.LSTM(d_model, d_model, num_layers=num_layers, bidirectional=True)
         self.gru = nn.GRU(d_model, d_model, num_layers=num_layers, bidirectional=True)
         self.cnn = CNN(d_model, layers_used=layers_used, num_layers=num_layers, div=div)
+        self.cnn2 = CNN(d_model, layers_used=layers_used, num_layers=num_layers, div=div)
+        self.cnn3 = nn.Conv1d(1, 2, 5, padding=2)
         
-        self.l0 = nn.Linear(d_model * 4 + d_model * layers_used // (div * num_layers) + d_model * layers_used, 2)
+        self.l0 = nn.Linear(d_model * 4 + d_model * layers_used // (div * num_layers) + d_model * layers_used + 2, 2)
         for param in self.lstm.parameters():
             if param.data.dim() > 1:
                 xavier_uniform_(param.data)
@@ -984,6 +986,12 @@ class SpanMixHead(nn.Module):
             if param.data.dim() > 1:
                 xavier_uniform_(param.data)
         for param in self.cnn.parameters():
+            if param.data.dim() > 1:
+                xavier_uniform_(param.data)
+        for param in self.cnn2.parameters():
+            if param.data.dim() > 1:
+                xavier_uniform_(param.data)
+        for param in self.cnn3.parameters():
             if param.data.dim() > 1:
                 xavier_uniform_(param.data)
         xavier_uniform_(self.d0.weight)
@@ -995,22 +1003,28 @@ class SpanMixHead(nn.Module):
         out = [out[-i - 1] for i in range(self.layers_used)]
         out = torch.cat(out, dim=-1)
         out = self.drop_out(out)
-        
-        span = self.d0(out)
+
+        out0 = out.permute(0, 2, 1)
+        tar_sz = out0.size()
+        out0 = self.cnn2(out0)
+        out0 = out0.permute(0, 2, 1)
+        span = self.d0(out0)
         
         out2 = self.d1(out)
         out1 = self.gru(out2.transpose(0, 1))[0].transpose(0, 1)
         out2 = self.lstm(out2.transpose(0, 1))[0].transpose(0, 1)
         
         out3 = out.permute(0, 2, 1)
-        tar_sz = out3.size()
         out3 = self.cnn(out3)
         out3 = out3.permute(0, 2, 1)
         
         out4 = out
+
+        span_used = self.cnn3(torch.sigmoid(span).permute(0, 2, 1)).view(tar_sz[0], 2, tar_sz[2]).permute(0, 2, 1)
         
         out = torch.cat((out1, out2, out3, out4), dim=-1)
         out = self.drop_out(out)
+        out = torch.cat((out, span_used), dim=-1)
         
         logits = self.l0(out)
         
