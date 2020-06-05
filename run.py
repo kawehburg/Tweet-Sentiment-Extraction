@@ -2,7 +2,8 @@ from tools.master import run, test, seed_everything, get_loss_fn, build_data, Mo
 from tools.master import test_folds, train_folds
 from tools.master import BERTModel, ELECTRAModel, RoBERTaModel, Albert, Embedding, XLNet
 from tools.master import BERTLoader, RoBERTaLoader, AlbertLoader, XLNetLoader
-from tools.master import LinearHead, CNNHead, TransformerHead, LSTMHead, GRUHead, MixHead, SpanHead, SpanCNNHead, SpanMixHead
+from tools.master import LinearHead, CNNHead, TransformerHead, LSTMHead, GRUHead, MixHead, SpanHead, SpanCNNHead, \
+    SpanMixHead
 from transformers import get_cosine_schedule_with_warmup, get_linear_schedule_with_warmup
 import argparse
 import os
@@ -31,7 +32,8 @@ head_list = {'linear': LinearHead, 'cnn': CNNHead, 'transformer': TransformerHea
 schedule_list = {'linear_warmup': get_linear_schedule_with_warmup, 'cosine_warmup': get_cosine_schedule_with_warmup}
 parser = argparse.ArgumentParser()
 parser.add_argument("--seed", default=1024, type=int)
-parser.add_argument("--data", default='data/train_folds.csv', type=str, choices=['data/train_folds.csv', 'data/extended_folds.csv'])
+parser.add_argument("--data", default='data/train_folds.csv', type=str,
+                    choices=['data/train_folds.csv', 'data/extended_folds.csv'])
 parser.add_argument("--model", default='roberta', type=str, choices=list(model_list.keys()))
 parser.add_argument("--pretrained", default='roberta', type=str, choices=list(config.keys()))
 parser.add_argument("--head", default='linear', type=str, choices=list(head_list.keys()))
@@ -44,53 +46,53 @@ args = parser.parse_args()
 
 print('CUDA_VISIBLE_DEVICES', os.environ["CUDA_VISIBLE_DEVICES"])
 
-
 #  0
 SEED = 1024
-# seed_everything(SEED)
+seed_everything(SEED)
 
 #  1
 data_name = 'train'
 DATA = f'data/{data_name}_folds.csv'
 
 #  2
-MODEL = 'xlnet'
-name = 'xlnet-base-cased'
+MODEL = 'roberta'
+name = 'roberta'
 base_model = model_list[MODEL](name=name)
 data = data_list[MODEL]
 
 #  3
-HEAD = 'span_cnn'
+HEAD = 'span_mix'
 d_model = config[name]
 layers_used = 2
 head = head_list[HEAD](d_model, layers_used, num_layers=2)
 
 #  4
 LOSS = None
-loss_fn = get_loss_fn(ce=0.5, jcd=0., span=0.5)
+# loss_fn = get_loss_fn(ce=0.4, dst=0., span=0.4, jcd=0.1, lvs=0.4, jel=0.1, ksl=0.1)
+loss_fn = get_loss_fn(ce=0.5, dst=0., span=0., jcd=0., lvs=0., jel=0.5, ksl=0.)
 
 #  5
-SCHEDULE = 'cosine_warmup'
+SCHEDULE = 'linear_warmup'
 schedule = schedule_list[SCHEDULE]
 
 #######
-train_batch_size = 18
-epochs = 4
-lr = 4e-5
+train_batch_size = 20
+epochs = 3
+lr = 3e-5
 
 save_path = f'saved/{data_name}_{MODEL}_{d_model}_{HEAD}_'
 result_path = f'results/{data_name}_{MODEL}_{d_model}_{HEAD}_'
 print(save_path)
 model = Model(base_model, head)
 print('param num =', collect(model))
-FOLDS = 5
-if args.train:
-    train_folds(FOLDS, DATA, data, model, train_batch_size, epochs, loss_fn, save_path, lr=lr, scheduler_fn=schedule,
-                name=name)
+FOLDS = [0, 1, 2, 3, 4]
+
+train_folds(FOLDS, DATA, data, model, train_batch_size, epochs, loss_fn, save_path,
+            lr=lr, scheduler_fn=schedule, name=name, pretrained=True)
 
 ########
 test_data = build_data("data/test.csv", data, train_batch_size, train_batch_size, name)
-test(model, test_data, save_path, result_path)
+# test(model, test_data, save_path, result_path)
 test_folds(FOLDS, model, test_data, save_path, result_path)
 ########
 

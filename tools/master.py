@@ -1098,8 +1098,8 @@ def train_fn(data_loader, model, optimizer, device, loss_fn=None, scheduler=None
                 target_string=selected_tweet,
                 # Span containing the specified sentiment for the px'th tweet in the batch
                 sentiment_val=tweet_sentiment,  # Sentiment of the px'th tweet in the batch
-                idx_start=np.argmax(outputs_start[px, :]),  # Predicted start index for the px'th tweet in the batch
-                idx_end=np.argmax(outputs_end[px, :]),  # Predicted end index for the px'th tweet in the batch
+                idx_start=outputs_start[px, :],  # Predicted start index for the px'th tweet in the batch
+                idx_end=outputs_end[px, :],  # Predicted end index for the px'th tweet in the batch
                 offsets=offsets[px]  # Offsets for each of the tokens for the px'th tweet in the batch
             )
             # if 'new' in tweet_id:
@@ -1124,8 +1124,35 @@ def calculate_jaccard_score(
         idx_end,
         offsets,
         verbose=False):
+    output_start = idx_start
+    output_end = idx_end
+    arg_start = np.argsort(output_start)
+    arg_end = np.argsort(output_end)
+    idx_start = arg_start[-1]
+    idx_end = arg_end[-1]
     if idx_end < idx_start:
-        idx_end = idx_start
+        start = idx_start
+        end = idx_start
+        # second_start = arg_start[-2]
+        # second_end = arg_end[-2]
+        # prob = 0
+        # # first + second
+        # if idx_start < second_end and prob < output_start[idx_start] * output_end[second_end]:
+        #     start = idx_start
+        #     end = second_end
+        #     prob = output_start[idx_start] * output_end[second_end]
+        # # second + first
+        # if second_start < idx_end and prob < output_start[second_start] * output_end[idx_end]:
+        #     start = second_start
+        #     end = idx_end
+        #     prob = output_start[second_start] * output_end[idx_end]
+        # # second + second
+        # if second_start < second_end and prob < output_start[second_start] * output_end[second_end]:
+        #     start = second_start
+        #     end = second_end
+        #     prob = output_start[second_start] * output_end[second_end]
+        idx_start = start
+        idx_end = end
     
     filtered_output = ""
     for ix in range(idx_start, idx_end + 1):
@@ -1215,8 +1242,8 @@ def eval_fn(data_loader, model, device, loss_fn=None):
                     target_string=selected_tweet,
                     # Span containing the specified sentiment for the px'th tweet in the batch
                     sentiment_val=tweet_sentiment,  # Sentiment of the px'th tweet in the batch
-                    idx_start=np.argmax(outputs_start[px, :]),  # Predicted start index for the px'th tweet in the batch
-                    idx_end=np.argmax(outputs_end[px, :]),  # Predicted end index for the px'th tweet in the batch
+                    idx_start=outputs_start[px, :],  # Predicted start index for the px'th tweet in the batch
+                    idx_end=outputs_end[px, :],  # Predicted end index for the px'th tweet in the batch
                     offsets=offsets[px]  # Offsets for each of the tokens for the px'th tweet in the batch
                 )
                 # if 'new' in tweet_id:
@@ -1314,6 +1341,10 @@ def run(fold, path, data, model, batch_size, epochs, loss_fn, save_path, lr=3e-5
     )
     es = utils.EarlyStopping(patience=2, mode="max")
     print(f"Training is Starting for fold={fold}")
+
+    # jaccard = eval_fn(valid_data_loader, model, device, loss_fn=loss_fn)
+    # print(f"Jaccard Score = {jaccard}")
+    
     for epoch in range(epochs):
         train_fn(train_data_loader, model, optimizer, device, loss_fn=loss_fn, scheduler=scheduler)
         jaccard = eval_fn(valid_data_loader, model, device, loss_fn=loss_fn)
@@ -1453,8 +1484,8 @@ def test(model, data_loader, SAVE_HEAD, MODE):
                     original_tweet=tweet,
                     target_string=selected_tweet,
                     sentiment_val=tweet_sentiment,
-                    idx_start=np.argmax(outputs_start[px, :]),
-                    idx_end=np.argmax(outputs_end[px, :]),
+                    idx_start=outputs_start[px, :],
+                    idx_end=outputs_end[px, :],
                     offsets=offsets[px]
                 )
                 final_output.append(output_sentence)
@@ -1478,6 +1509,7 @@ def test_folds(folds, model, data_loader, SAVE_HEAD, MODE):
     device = torch.device("cuda")
     
     # Load each of the five trained models and move to GPU
+    folds_num = len(folds)
     ensemble = nn.ModuleList([])
     for i in range(folds[-1] + 1):
         _model = copy.deepcopy(model)
@@ -1527,8 +1559,8 @@ def test_folds(folds, model, data_loader, SAVE_HEAD, MODE):
             for i in range(1, len(output_start_list)):
                 outputs_start = outputs_start + output_start_list[i]
                 outputs_end = outputs_end + output_end_list[i]
-            outputs_start = outputs_start / folds
-            outputs_end = outputs_end / folds
+            outputs_start = outputs_start / folds_num
+            outputs_end = outputs_end / folds_num
             
             # Apply softmax to the predicted start and end logits
             outputs_start = torch.softmax(outputs_start, dim=1).cpu().detach().numpy()
@@ -1542,8 +1574,8 @@ def test_folds(folds, model, data_loader, SAVE_HEAD, MODE):
                     original_tweet=tweet,
                     target_string=selected_tweet,
                     sentiment_val=tweet_sentiment,
-                    idx_start=np.argmax(outputs_start[px, :]),
-                    idx_end=np.argmax(outputs_end[px, :]),
+                    idx_start=outputs_start[px, :],
+                    idx_end=outputs_end[px, :],
                     offsets=offsets[px]
                 )
                 final_output.append(output_sentence)

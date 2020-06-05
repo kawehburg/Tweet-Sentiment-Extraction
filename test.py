@@ -1,4 +1,4 @@
-from transformers import BertTokenizer, XLNetTokenizer, AlbertTokenizer, AlbertForQuestionAnswering, ElectraModel, XLNetTokenizer
+from transformers import BertTokenizer, XLNetModel, AlbertTokenizer, AlbertForQuestionAnswering, ElectraModel, XLNetTokenizer, BertModel
 
 
 def xavier(model, escapes=None, escapekey=None):
@@ -57,9 +57,14 @@ with open('data/train.csv', 'r', encoding='utf-8') as f:
     for line in f:
         data.append(line.split(',')[2])
 
-tokenizer = XLNetTokenizer.from_pretrained('xlnet-large-cased')
+tokenizer = XLNetTokenizer.from_pretrained('xlnet-base-cased')
 print(len(tokenizer))
-# model = ElectraModel.from_pretrained('google/electra-large-discriminator', output_hidden_states=True, output_attentions=True)
+tokenizer.save_pretrained('save_pretrained')
+input('DONE')
+print(len(tokenizer))
+model = XLNetModel.from_pretrained('xlnet-base-cased', output_hidden_states=True, output_attentions=True)
+model.save_pretrained('save_pretrained')
+input('DONE')
 # model = AlbertForQuestionAnswering.from_pretrained('albert-large-v2')
 # xavier(model)
 # input()
