@@ -59,16 +59,16 @@ with open('data/train.csv', 'r', encoding='utf-8') as f:
 
 tokenizer = XLNetTokenizer.from_pretrained('xlnet-base-cased')
 print(len(tokenizer))
-tokenizer.save_pretrained('save_pretrained')
+tokenizer.save_vocabulary('xlnet_model')
 input('DONE')
 print(len(tokenizer))
 model = XLNetModel.from_pretrained('xlnet-base-cased', output_hidden_states=True, output_attentions=True)
-model.save_pretrained('save_pretrained')
+model.save_pretrained('xlnet_model')
 input('DONE')
 # model = AlbertForQuestionAnswering.from_pretrained('albert-large-v2')
 # xavier(model)
 # input()
-raw_text = ": ''UB40m'Br-ing Me - Yo-- ur Cup''' ? http://blip.fm/~7af72"
+raw_text = ": ''>UBï¿½40m'Br-ing M^e - Yo-- ur Câup''' ? http://blip.fm/~7af72"
 # raw_text = line
 raw_text = raw_text.replace('ï¿½', '').replace('ï', 'i').replace('``', '"').replace('^', '#').replace("''", '"')
 raw = ' '.join(raw_text.split())

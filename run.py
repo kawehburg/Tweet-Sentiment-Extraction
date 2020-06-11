@@ -1,9 +1,9 @@
 from tools.master import run, test, seed_everything, get_loss_fn, build_data, Model, collect
 from tools.master import test_folds, train_folds
 from tools.master import BERTModel, ELECTRAModel, RoBERTaModel, Albert, Embedding, XLNet
-from tools.master import BERTLoader, RoBERTaLoader, AlbertLoader, XLNetLoader
+from tools.master import BERTLoader, RoBERTaLoader, AlbertLoader, XLNetLoader, SP_XLNetLoader
 from tools.master import LinearHead, CNNHead, TransformerHead, LSTMHead, GRUHead, MixHead, SpanHead, SpanCNNHead, \
-    SpanMixHead
+    SpanMixHead, StackCNNHead
 from transformers import get_cosine_schedule_with_warmup, get_linear_schedule_with_warmup
 import argparse
 import os
@@ -25,10 +25,11 @@ config = {'bert-base-uncased': 768, 'bert-large-uncased': 1024, 'bert-base-cased
           }
 
 data_list = {'bert': BERTLoader, 'electra': BERTLoader, 'roberta': RoBERTaLoader,
-             'albert': AlbertLoader, 'embedding': BERTLoader, 'xlnet': XLNetLoader}
+             'albert': AlbertLoader, 'embedding': BERTLoader, 'xlnet': SP_XLNetLoader}
 
 head_list = {'linear': LinearHead, 'cnn': CNNHead, 'transformer': TransformerHead, 'lstm': LSTMHead, 'gru': GRUHead,
-             'mix': MixHead, 'span_linear': SpanHead, 'span_cnn': SpanCNNHead, 'span_mix': SpanMixHead}
+             'mix': MixHead, 'span_linear': SpanHead, 'span_cnn': SpanCNNHead, 'span_mix': SpanMixHead,
+             'scnn': StackCNNHead}
 schedule_list = {'linear_warmup': get_linear_schedule_with_warmup, 'cosine_warmup': get_cosine_schedule_with_warmup}
 parser = argparse.ArgumentParser()
 parser.add_argument("--seed", default=1024, type=int)
@@ -55,13 +56,13 @@ data_name = 'train'
 DATA = f'data/{data_name}_folds.csv'
 
 #  2
-MODEL = 'roberta'
-name = 'roberta'
+MODEL = 'xlnet'
+name = 'xlnet-base-cased'
 base_model = model_list[MODEL](name=name)
 data = data_list[MODEL]
 
 #  3
-HEAD = 'span_mix'
+HEAD = 'linear'
 d_model = config[name]
 layers_used = 2
 head = head_list[HEAD](d_model, layers_used, num_layers=2)
@@ -69,7 +70,7 @@ head = head_list[HEAD](d_model, layers_used, num_layers=2)
 #  4
 LOSS = None
 # loss_fn = get_loss_fn(ce=0.4, dst=0., span=0.4, jcd=0.1, lvs=0.4, jel=0.1, ksl=0.1)
-loss_fn = get_loss_fn(ce=0.5, dst=0., span=0., jcd=0., lvs=0., jel=0.5, ksl=0.)
+loss_fn = get_loss_fn(ce=0.1, dst=0., span=0., jcd=0., lvs=0., jel=0., ksl=0.)
 
 #  5
 SCHEDULE = 'linear_warmup'

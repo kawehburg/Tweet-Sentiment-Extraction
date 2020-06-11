@@ -528,6 +528,118 @@ class AlbertLoader:
         }
 
 
+class SP_XLNetLoader:
+    @staticmethod
+    def process_data(tweet, selected_text, sentiment, tokenizer, max_len):
+        tweet = " " + " ".join(str(tweet).split())
+        selected_text = " " + " ".join(str(selected_text).split())
+        
+        len_st = len(selected_text) - 1
+        idx0 = None
+        idx1 = None
+        
+        for ind in (i for i, e in enumerate(tweet) if e == selected_text[1]):
+            if " " + tweet[ind: ind + len_st] == selected_text:
+                idx0 = ind
+                idx1 = ind + len_st - 1
+                break
+        
+        char_targets = [0] * len(tweet)
+        if idx0 != None and idx1 != None:
+            for ct in range(idx0, idx1 + 1):
+                char_targets[ct] = 1
+        
+        tok_tweet = tokenizer.encode(tweet)
+        input_ids_orig = tok_tweet.ids
+        tweet_offsets = tok_tweet.offsets
+        
+        target_idx = []
+        for j, (offset1, offset2) in enumerate(tweet_offsets):
+            if sum(char_targets[offset1: offset2]) > 0:
+                target_idx.append(j)
+        try:
+            targets_start = target_idx[0]
+            targets_end = target_idx[-1]
+        except:
+            targets_start = 0
+            targets_end = len(input_ids_orig)
+            print('>>', tweet)
+            print('>>', selected_text)
+        
+        sentiment_id = {
+            'positive': tokenizer.token_to_id('positive'),
+            'negative': tokenizer.token_to_id('negative'),
+            'neutral': tokenizer.token_to_id('neutral')
+        }
+        
+        input_ids = [0] + [sentiment_id[sentiment]] + [2] + [2] + input_ids_orig + [2]
+        token_type_ids = [0, 0, 0, 0] + [0] * (len(input_ids_orig) + 1)
+        mask = [1] * len(token_type_ids)
+        tweet_offsets = [(0, 0)] * 4 + tweet_offsets + [(0, 0)]
+        targets_start += 4
+        targets_end += 4
+        
+        padding_length = max_len - len(input_ids)
+        if padding_length > 0:
+            input_ids = input_ids + ([1] * padding_length)
+            mask = mask + ([0] * padding_length)
+            token_type_ids = token_type_ids + ([0] * padding_length)
+            tweet_offsets = tweet_offsets + ([(0, 0)] * padding_length)
+        
+        return {
+            'ids': input_ids,
+            'mask': mask,
+            'token_type_ids': token_type_ids,
+            'targets_start': targets_start,
+            'targets_end': targets_end,
+            'orig_tweet': tweet,
+            'orig_selected': selected_text,
+            'sentiment': sentiment,
+            'offsets': tweet_offsets,
+        }
+    
+    def __init__(self, tweet, sentiment, selected_text, tweet_id=None, name='roberta', max_len=192, **kwargs):
+        self.tweet = tweet
+        self.sentiment = sentiment
+        self.selected_text = selected_text
+        ROBERTA_PATH = name
+        self.tokenizer = tokenizers.SentencePieceBPETokenizer
+        self.tokenizer = tokenizers.ByteLevelBPETokenizer(
+            vocab_file=f"{ROBERTA_PATH}/vocab.json",
+            merges_file=f"{ROBERTA_PATH}/merges.txt",
+            lowercase=True,
+            add_prefix_space=True
+        )
+        self.max_len = max_len
+        self.tweet_id = tweet_id
+    
+    def __len__(self):
+        return len(self.tweet)
+    
+    def __getitem__(self, item):
+        data = self.process_data(
+            self.tweet[item],
+            self.selected_text[item],
+            self.sentiment[item],
+            self.tokenizer,
+            self.max_len
+        )
+        
+        # Return the processed data where the lists are converted to `torch.tensor`s
+        return {
+            'tweet_id': self.tweet_id[item],
+            'ids': torch.tensor(data["ids"], dtype=torch.long),
+            'mask': torch.tensor(data["mask"], dtype=torch.long),
+            'token_type_ids': torch.tensor(data["token_type_ids"], dtype=torch.long),
+            'targets_start': torch.tensor(data["targets_start"], dtype=torch.long),
+            'targets_end': torch.tensor(data["targets_end"], dtype=torch.long),
+            'orig_tweet': data["orig_tweet"],
+            'orig_selected': data["orig_selected"],
+            'sentiment': data["sentiment"],
+            'offsets': torch.tensor(data["offsets"], dtype=torch.long)
+        }
+
+
 class XLNetLoader:
     @staticmethod
     def get_offsets(s, pattern, ignore=0):
@@ -726,6 +838,45 @@ class CNNHead(nn.Module):
         start_logits, end_logits = logits.split(1, dim=-1)
         start_logits = start_logits.squeeze(-1)
         end_logits = end_logits.squeeze(-1)
+        return {'start_logits': start_logits, 'end_logits': end_logits}
+
+
+class StackCNNHead(nn.Module):
+    def __init__(self, d_model, layers_used, num_layers=4, div=2):
+        super().__init__()
+        self.d_model = d_model
+        self.layers_used = layers_used
+        self.drop_out = nn.Dropout(0.15)
+        self.cnn1 = CNN(d_model, layers_used=1, num_layers=num_layers, div=div)
+        self.cnn2 = CNN(d_model, layers_used=1, num_layers=num_layers, div=div)
+        self.l1 = nn.Linear(d_model * 1 // (div ** num_layers), 1)
+        self.l2 = nn.Linear(d_model * 1 // (div ** num_layers), 1)
+        for param in self.cnn1.parameters():
+            if param.data.dim() > 1:
+                xavier_uniform_(param.data)
+        for param in self.cnn2.parameters():
+            if param.data.dim() > 1:
+                xavier_uniform_(param.data)
+        xavier_uniform_(self.l1.weight)
+        xavier_uniform_(self.l2.weight)
+    
+    def forward(self, out, mask=None):
+        out = [out[-i - 1] for i in range(self.layers_used)]
+        out = torch.stack(out)
+        out = torch.mean(out, 0)
+        out = self.drop_out(out)  # bs x SL x (768 * 2)
+        out = out.permute(0, 2, 1)
+        
+        out1 = self.cnn1(out)
+        out1 = out1.permute(0, 2, 1)
+        start_logits = self.l1(out1)
+        start_logits = start_logits.squeeze(-1)
+        
+        out2 = self.cnn2(out)
+        out2 = out2.permute(0, 2, 1)
+        end_logits = self.l2(out2)
+        end_logits = end_logits.squeeze(-1)
+        
         return {'start_logits': start_logits, 'end_logits': end_logits}
 
 
@@ -1003,7 +1154,7 @@ class SpanMixHead(nn.Module):
         out = [out[-i - 1] for i in range(self.layers_used)]
         out = torch.cat(out, dim=-1)
         out = self.drop_out(out)
-
+        
         out0 = out.permute(0, 2, 1)
         tar_sz = out0.size()
         out0 = self.cnn2(out0)
@@ -1019,7 +1170,7 @@ class SpanMixHead(nn.Module):
         out3 = out3.permute(0, 2, 1)
         
         out4 = out
-
+        
         span_used = self.cnn3(torch.sigmoid(span).permute(0, 2, 1)).view(tar_sz[0], 2, tar_sz[2]).permute(0, 2, 1)
         
         out = torch.cat((out1, out2, out3, out4), dim=-1)
@@ -1341,7 +1492,7 @@ def run(fold, path, data, model, batch_size, epochs, loss_fn, save_path, lr=3e-5
     )
     es = utils.EarlyStopping(patience=2, mode="max")
     print(f"Training is Starting for fold={fold}")
-
+    
     # jaccard = eval_fn(valid_data_loader, model, device, loss_fn=loss_fn)
     # print(f"Jaccard Score = {jaccard}")
     
@@ -1607,7 +1758,7 @@ def get_loss_fn(ce=1., dst=0., span=0., jcd=0., lvs=0., jel=0., ksl=0., **kwargs
             loss = loss + jel * jel_loss(start_logits, end_logits, start_positions, end_positions)
         if ksl != 0:
             loss = loss + ksl * (KSLoss(start_logits, start_positions) + KSLoss(end_logits, end_positions)) / 2
-
+        
         return loss
     
     return f
@@ -1690,14 +1841,14 @@ def jaccard_loss(pred, target, smooth=1e-10):
 def jel_loss(start_logits, end_logits, start_positions, end_positions):
     # from https://www.kaggle.com/koza4ukdmitrij/jaccard-expectation-loss/comments
     indexes = torch.arange(start_logits.size()[1]).unsqueeze(0).cuda()
-
+    
     start_pred = torch.sum(F.softmax(start_logits, dim=-1) * indexes, dim=1)
     end_pred = torch.sum(F.softmax(end_logits, dim=-1) * indexes, dim=1)
-
+    
     len_true = end_positions - start_positions + 1
     intersection = len_true - F.relu(start_pred - start_positions) - F.relu(end_positions - end_pred)
     union = len_true + F.relu(start_positions - start_pred) + F.relu(end_pred - end_positions)
-
+    
     jel = 1 - intersection / union
     jel = torch.mean(jel)
     return jel
