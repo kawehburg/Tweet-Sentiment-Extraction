@@ -1,3 +1,4 @@
+# coding=utf-8
 from transformers import BertTokenizer, XLNetModel, AlbertTokenizer, AlbertForQuestionAnswering, ElectraModel, XLNetTokenizer, BertModel
 
 
@@ -53,7 +54,7 @@ def rebuild(raw, offset):
 
 
 data = []
-with open('data/train.csv', 'r', encoding='utf-8') as f:
+with open('data/train.csv', 'r') as f:
     for line in f:
         data.append(line.split(',')[2])
 
@@ -68,7 +69,7 @@ input('DONE')
 # model = AlbertForQuestionAnswering.from_pretrained('albert-large-v2')
 # xavier(model)
 # input()
-raw_text = ": ''>UBï¿½40m'Br-ing M^e - Yo-- ur Câup''' ? http://blip.fm/~7af72"
+raw_text = ":''>ï¿½-^â?~"
 # raw_text = line
 raw_text = raw_text.replace('ï¿½', '').replace('ï', 'i').replace('``', '"').replace('^', '#').replace("''", '"')
 raw = ' '.join(raw_text.split())
