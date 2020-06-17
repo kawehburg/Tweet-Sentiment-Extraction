@@ -1,5 +1,6 @@
 # coding=utf-8
-from transformers import BertTokenizer, XLNetModel, AlbertTokenizer, AlbertForQuestionAnswering, ElectraModel, XLNetTokenizer, BertModel
+from transformers import BertTokenizer, XLNetModel, AlbertTokenizer, AlbertForQuestionAnswering, ElectraModel, \
+    XLNetTokenizer, BertModel, AlbertConfig, BertConfig
 
 
 def xavier(model, escapes=None, escapekey=None):
@@ -58,6 +59,9 @@ with open('data/train.csv', 'r') as f:
     for line in f:
         data.append(line.split(',')[2])
 
+tokenizer = XLNetTokenizer.from_pretrained('xlnet-base-cased')
+tokenizer.save_vocabulary('.')
+input('done')
 tokenizer = XLNetTokenizer.from_pretrained('xlnet-base-cased')
 print(len(tokenizer))
 tokenizer.save_vocabulary('xlnet_model')

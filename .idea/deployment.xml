@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
-  <component name="PublishConfigData" autoUpload="Always" serverName="tweet" showEqualInSync="true">
+  <component name="PublishConfigData" autoUpload="Always" serverName="tweet69" compareModeInSync="SIZE" showEqualInSync="true">
     <serverData>
       <paths name="ITDD-gpu01">
         <serverdata>
@@ -45,6 +45,13 @@
         </serverdata>
       </paths>
       <paths name="tweet69">
+        <serverdata>
+          <mappings>
+            <mapping deploy="/home/sunweiwei/python/tweet" local="$PROJECT_DIR$" web="/" />
+          </mappings>
+        </serverdata>
+      </paths>
+      <paths name="yaoyu">
         <serverdata>
           <mappings>
             <mapping deploy="/home/sunweiwei/python/tweet" local="$PROJECT_DIR$" web="/" />
